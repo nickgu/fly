@@ -31,7 +31,7 @@ auc: auc.cc
 	g++ $^ -o $@ $(LIBS) $(CPPFLAGS) $(INCLUDES) 
 
 clean:
-	rm -rf *.o *.so *~ $(TARGET)
+	rm -rf *.o *.so *~ $(TARGET) models/*~
 	rm -rf output
 
 test:

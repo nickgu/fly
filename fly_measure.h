@@ -1,14 +1,6 @@
-/***************************************************************************
- * 
- * Copyright (c) 2015 Baidu.com, Inc. All Rights Reserved
- * 
- **************************************************************************/
- 
- 
- 
 /**
  * @file fly_measure.h
- * @author gusimiu(com@baidu.com)
+ * @author nickgu
  * @date 2015/01/14 15:33:45
  * @brief 
  *  

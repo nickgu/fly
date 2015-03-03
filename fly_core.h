@@ -1,14 +1,6 @@
-/***************************************************************************
- * 
- * Copyright (c) 2015 Baidu.com, Inc. All Rights Reserved
- * 
- **************************************************************************/
- 
- 
- 
 /**
  * @file read.h
- * @author gusimiu(com@baidu.com)
+ * @author nickgu
  * @date 2015/01/13 12:15:28
  * @brief 
  *  
@@ -108,7 +100,6 @@ class FlyReader_t {
         virtual void reset() = 0;
 
         /**
-         * random read.
          *  usage:
          *      FeatureReader_t r(stream);
          *      Instance_t item;

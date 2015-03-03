@@ -1,14 +1,6 @@
-/***************************************************************************
- * 
- * Copyright (c) 2015 Baidu.com, Inc. All Rights Reserved
- * 
- **************************************************************************/
- 
- 
- 
 /**
  * @file all_models.h
- * @author gusimiu(com@baidu.com)
+ * @author nickgu
  * @date 2015/01/16 12:22:48
  * @brief 
  *  

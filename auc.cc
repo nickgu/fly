@@ -1,14 +1,6 @@
-/***************************************************************************
- * 
- * Copyright (c) 2015 Baidu.com, Inc. All Rights Reserved
- * 
- **************************************************************************/
- 
- 
- 
 /**
  * @file multi_auc.cc
- * @author gusimiu(com@baidu.com)
+ * @author nickgu
  * @date 2015/01/27 17:39:08
  * @brief 
  *  
