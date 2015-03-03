@@ -136,6 +136,18 @@ ConfusionMatrix_t calc_confussion_matrix(size_t num, ResultPair_t* result) {
     return ret;
 }
 
+int calc_error(size_t num, ResultPair_t* result) {
+    int bad=0;
+    for (size_t i=0; i<num; ++i) {
+        float f = fabs(result[i].target - result[i].output);
+        if ( f>0.5 ) {
+            bad ++;
+        }
+    }
+    return bad;
+}
+
+
 #endif  //__FLY_MEASURE_H_
 
 /* vim: set expandtab ts=4 sw=4 sts=4 tw=100: */

@@ -17,6 +17,8 @@
 #include "models/mnn.h"
 #include "models/gbdt.h"
 
+#include "models/meta.h"
+
 #endif  //__ALL_MODELS_H_
 
 /* vim: set expandtab ts=4 sw=4 sts=4 tw=100: */

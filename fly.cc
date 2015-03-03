@@ -162,6 +162,9 @@ int main(int argc, char** argv) {
 
     } else if (strcmp(model_name, "gbdt")==0) {
         model = new GBDT_t(model_config, config_section);
+    } else if (strcmp(model_name, "meta")==0) {
+        model = new MetaModel_t(model_config, config_section);
+
     } else {
         LOG_NOTICE("bad models.");
         return -1;
@@ -244,6 +247,10 @@ int main(int argc, char** argv) {
     float rmse = calc_rmse(c, res_list);
     LOG_NOTICE("rmse: %f, mse=%f", rmse, rmse*rmse);
     LOG_NOTICE("confussion: %s", calc_confussion_matrix(c, res_list).str().c_str());
+
+    int error = calc_error(c, res_list);
+    LOG_NOTICE("error: %d/%d (%.2f%%)", error, c, error*100.0/c);
+
     delete [] res_list;
     
     if (train_data_reader) {
