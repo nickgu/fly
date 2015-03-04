@@ -157,7 +157,6 @@ void* __worker_layer_processor(void* input) {
     // critical time demand.
     // make sort step over. in O(n)
     uint32_t same_key = INVALID_SAME_KEY;
-
     for (uint32_t i=0; i<job.item_count; ++i) {
         SortedIndex_t si = job.finfo[i];
         short nid = job.iinfo[ si.index ].in_which_node;
@@ -396,10 +395,13 @@ class GBDT_t
                 int cur_per = 0;
                 while (reader->read(&item, true)) {
                     _labels[item_id].residual = item.label;
+                    // some feature may be missing.
+                    for (int i=0; i<_dim_count; ++i) {
+                        ptr[i][item_id].index = item_id;
+                    }
                     for (size_t i=0; i<item.features.size(); ++i) {
                         const IndValue_t& f = item.features[i];
                         ptr[f.index][item_id].value = f.value;
-                        ptr[f.index][item_id].index = item_id;
                     }
                     item_id ++;
 
@@ -410,6 +412,9 @@ class GBDT_t
                     }
                 }
                 fprintf(stderr, "\n");
+
+                system("rm -rf gbdt_temp");
+                system("mkdir gbdt_temp");
 
                 for (int fid=0; fid<_dim_count; ++fid) {
                     LOG_NOTICE("sort dim : %d", fid);
@@ -428,6 +433,10 @@ class GBDT_t
                     char buf[32];
                     snprintf(buf, sizeof(buf), "gbdt_temp/feature.%d", fid);
                     FILE* fout = fopen(buf, "wb");
+                    if (!fout) {
+                        LOG_ERROR("open temp directory to save field information failed! [%s]", buf);
+                        exit(-1);
+                    }
                     fwrite(idx_list, _item_count, sizeof(SortedIndex_t), fout);
                     fclose(fout);
                     _ffd[fid] = fopen(buf, "rb");
@@ -453,6 +462,22 @@ class GBDT_t
                 fseek(_ffd[i], 0, SEEK_SET);
                 fread(_sorted_fields[i], _item_count, sizeof(SortedIndex_t), _ffd[i]);
             }
+
+            /*
+            size_t sz = (_item_count + 8) / 8;
+            unsigned char* dedup = new unsigned char[sz];
+            for (int f=0; f<_dim_count; ++f) {
+                memset(dedup, 0, sz);
+                for (int i=0; i<_item_count; ++i) {
+                    if (IS_1(dedup, i)) {
+                        LOG_ERROR("dup: i=%d f=%d", i, f);
+                        exit(-1);
+                    }
+                    SET_1(dedup, i);
+                }
+            }
+            delete [] dedup;
+            */
 
             tm.end();
             LOG_NOTICE("load field time: %.2fs", tm.cost_time());
