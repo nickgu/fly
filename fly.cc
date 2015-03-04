@@ -162,8 +162,12 @@ int main(int argc, char** argv) {
 
     } else if (strcmp(model_name, "gbdt")==0) {
         model = new GBDT_t(model_config, config_section);
+
     } else if (strcmp(model_name, "meta")==0) {
         model = new MetaModel_t(model_config, config_section);
+
+    } else if (strcmp(model_name, "knn") == 0) {
+        model = new KNNModel_t(model_config, config_section);
 
     } else {
         LOG_NOTICE("bad models.");

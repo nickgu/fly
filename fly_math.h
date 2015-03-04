@@ -171,7 +171,6 @@ float sparse_dot(const Param_t& p, const FArray_t<IndValue_t>& input) {
     return ret;
 }
 
-
 #endif  //__FLY_MATH_H_
 
 /* vim: set expandtab ts=4 sw=4 sts=4 tw=100: */

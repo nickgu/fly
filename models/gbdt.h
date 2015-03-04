@@ -157,9 +157,11 @@ void* __worker_layer_processor(void* input) {
     // critical time demand.
     // make sort step over. in O(n)
     uint32_t same_key = INVALID_SAME_KEY;
+
     for (uint32_t i=0; i<job.item_count; ++i) {
         SortedIndex_t si = job.finfo[i];
         short nid = job.iinfo[ si.index ].in_which_node;
+
         if (!si.same) { // first index of continuous same value.
             same_key = INVALID_SAME_KEY;
         }
@@ -188,6 +190,11 @@ void* __worker_layer_processor(void* input) {
         }
 
         nod.temp_sum += job.iinfo[ si.index ].residual;
+
+        if (nod.grow>=nod.end) {
+            LOG_ERROR("ERROR_ACCESS! nod_id=%d grow=%d end=%d", nid, nod.grow, nod.end);
+            exit(-1);
+        }
         dim_id_sorted[ nod.grow++ ] = si;
     }
     for (int n=job.beg_node; n<job.end_node; ++n) {
@@ -195,6 +202,7 @@ void* __worker_layer_processor(void* input) {
         node.end = node.grow;
         node.score = (node.square_sum - node.score) / node.cnt;
     }
+
     ta.end();
     LOG_DEBUG("Feature %d training time=%.2fs", job.feature_index, ta.cost_time());
     pthread_exit(0);
@@ -227,11 +235,6 @@ class GBDT_t
             _ffd(NULL),
             _sorted_fields(NULL)
         {
-            // default 20G memory can be used.
-            _maximum_memory = config.conf_int_default(section, "maximum_memory", 20000);
-            _maximum_memory <<= 20;
-            LOG_NOTICE("Memory can be used: %lluMB", _maximum_memory>>20);
-
             _sample_feature = config.conf_float_default(section, "sample_feature", 1.0);
             _sample_instance = config.conf_float_default(section, "sample_instance", 1.0);
             LOG_NOTICE("Sample_info: feature=%.2f instance=%.2f", _sample_feature, _sample_instance);
@@ -382,83 +385,59 @@ class GBDT_t
                 fprintf(stderr, "\n");
 
             } else { // save to _feature_output_dir
-                size_t est_size = _item_count * sizeof(FeatureInfo_t);
-                size_t feature_processed_count = _maximum_memory / est_size;
-                if (feature_processed_count > (size_t)_dim_count) {
-                    feature_processed_count = _dim_count;
-                }
-                LOG_NOTICE("Each column info size: %umb. we can calculate %u columns together.", 
-                        est_size>>20, feature_processed_count);
-                FeatureInfo_t **ptr = new FeatureInfo_t*[feature_processed_count];
-                for (size_t i=0; i<feature_processed_count; ++i) {
+                FeatureInfo_t **ptr = new FeatureInfo_t*[_dim_count];
+                for (int i=0; i<_dim_count; ++i) {
                     ptr[i] = new FeatureInfo_t[_item_count];
-                    for (size_t j=0; j<_item_count; ++j) {
-                        ptr[i][j].index = j;
-                    }
                 }
                 SortedIndex_t *idx_list = new SortedIndex_t[_item_count];
 
-                bool first_read = true;
-                for (int dim_begin=0; dim_begin<_dim_count; dim_begin+=feature_processed_count) {
-                    int dim_end = dim_begin + feature_processed_count;
-                    if (dim_end >= _dim_count) {
-                        dim_end = _dim_count;
+                Instance_t item;
+                size_t item_id = 0;
+                int cur_per = 0;
+                while (reader->read(&item, true)) {
+                    _labels[item_id].residual = item.label;
+                    for (size_t i=0; i<item.features.size(); ++i) {
+                        const IndValue_t& f = item.features[i];
+                        ptr[f.index][item_id].value = f.value;
+                        ptr[f.index][item_id].index = item_id;
                     }
-                    LOG_NOTICE("load features: [%d, %d)", dim_begin, dim_end);
+                    item_id ++;
 
-                    Instance_t item;
-                    size_t item_id = 0;
-                    int cur_per = 0;
-                    while (reader->read(&item, true)) {
-                        if (first_read) {
-                            _labels[item_id].residual = item.label;
-                        }
-                        for (size_t i=0; i<item.features.size(); ++i) {
-                            const IndValue_t& f = item.features[i];
-                            if (f.index >= dim_begin and f.index < dim_end) {
-                                ptr[f.index - dim_begin][item_id].value = f.value;
-                            }
-                        }
-                        item_id ++;
+                    int per = reader->percentage();
+                    if (per > cur_per) {
+                        cur_per = per;
+                        fprintf(stderr, "%c%4d%% loaded..", 13, cur_per);
+                    }
+                }
+                fprintf(stderr, "\n");
 
-                        int per = reader->percentage();
-                        if (per > cur_per) {
-                            cur_per = per;
-                            fprintf(stderr, "%c%4d%% loaded..", 13, cur_per);
+                for (int fid=0; fid<_dim_count; ++fid) {
+                    LOG_NOTICE("sort dim : %d", fid);
+                    sort(ptr[fid], ptr[fid]+_item_count);
+                    LOG_NOTICE("sort dim %d over.", fid);
+
+                    for (size_t i=0; i<_item_count; ++i) {
+                        idx_list[i].index = ptr[fid][i].index;
+                        if (i>0 && ptr[fid][i].value == ptr[fid][i-1].value) {
+                            idx_list[i].same = 1;
+                        } else {
+                            idx_list[i].same = 0;
                         }
                     }
-                    fprintf(stderr, "\n");
 
-                    for (int fid=dim_begin; fid<dim_end; ++fid) {
-                        LOG_NOTICE("sort dim : %d", fid);
-                        sort(ptr[fid-dim_begin], ptr[fid-dim_begin]+_item_count);
-                        LOG_NOTICE("sort dim %d over.", fid);
+                    char buf[32];
+                    snprintf(buf, sizeof(buf), "gbdt_temp/feature.%d", fid);
+                    FILE* fout = fopen(buf, "wb");
+                    fwrite(idx_list, _item_count, sizeof(SortedIndex_t), fout);
+                    fclose(fout);
+                    _ffd[fid] = fopen(buf, "rb");
 
-                        for (size_t i=0; i<_item_count; ++i) {
-                            idx_list[i].index = ptr[fid-dim_begin][i].index;
-                            if (i>0 && ptr[fid-dim_begin][i].value == ptr[fid-dim_begin][i-1].value) {
-                                idx_list[i].same = 1;
-                            } else {
-                                idx_list[i].same = 0;
-                            }
-                        }
-
-                        char buf[32];
-                        snprintf(buf, sizeof(buf), "gbdt_temp/feature.%d", fid);
-                        FILE* fout = fopen(buf, "wb");
-                        fwrite(idx_list, _item_count, sizeof(SortedIndex_t), fout);
-                        fclose(fout);
-                        _ffd[fid] = fopen(buf, "rb");
-                        memset(ptr[fid-dim_begin], 0, sizeof(FeatureInfo_t)*_item_count);
-
-                        LOG_NOTICE("write feature file over [%s]", buf);
-                    }
-                    first_read = false;
+                    LOG_NOTICE("write feature file over [%s]", buf);
                 }
 
                 // free memory.
                 delete [] idx_list;
-                for (size_t i=0; i<feature_processed_count; ++i) {
+                for (int i=0; i<_dim_count; ++i) {
                     delete [] ptr[i];
                 }
                 delete [] ptr;
@@ -468,11 +447,13 @@ class GBDT_t
             _sorted_fields = new SortedIndex_t*[_dim_count];
             Timer tm;
             tm.begin();
+
             for (int i=0; i<_dim_count; ++i) {
                 _sorted_fields[i] = new SortedIndex_t[_item_count];
                 fseek(_ffd[i], 0, SEEK_SET);
                 fread(_sorted_fields[i], _item_count, sizeof(SortedIndex_t), _ffd[i]);
             }
+
             tm.end();
             LOG_NOTICE("load field time: %.2fs", tm.cost_time());
             return ;
@@ -510,10 +491,10 @@ class GBDT_t
                 memset(is_item_selected, 0, sizeof(unsigned char)*item_sample_buffer_size);
                 size_t sample_item_count = 0;
                 for (size_t i=0; i<_item_count; ++i) {
+                    iinfo[i].in_which_node = 0;
                     if (_sample(_sample_instance)) {
                         SET_1(is_item_selected, i);
                         sample_item_count += 1;
-                        iinfo[i].in_which_node = 0;
                         root.sum += iinfo[i].residual;
                         root.square_sum += iinfo[i].residual * iinfo[i].residual;
                     }
@@ -584,6 +565,21 @@ class GBDT_t
                             }
                         }
                     }
+
+                    /*
+                    map<int, int> tb;
+                    for (int i=0; i<_item_count; ++i) {
+                        tb[iinfo[i].in_which_node] ++;
+                    }
+                    for (int n=beg_node; n<end_node; ++n) {
+                        LOG_NOTICE("after_layer: Tree=%d node=%d beg:%d end:%d fidx=%d", 
+                                T, n, _trees[T][n].begin, _trees[T][n].end, _trees[T][n].fidx);
+                        LOG_NOTICE("        L  : Tree=%d node=%d beg:%d end:%d (alloc=%d)", 
+                                T, _L(n), _trees[T][_L(n)].begin, _trees[T][_L(n)].end, tb[_L(n)]);
+                        LOG_NOTICE("        R  : Tree=%d node=%d beg:%d end:%d (alloc=%d)", 
+                                T, _R(n), _trees[T][_R(n)].begin, _trees[T][_R(n)].end, tb[_R(n)]);
+                    }
+                    */
 
                     for (int i=beg_node; i<end_node; ++i) {
                         if (_trees[T][i].fidx>=0) {

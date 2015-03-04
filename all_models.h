@@ -17,6 +17,7 @@
 #include "models/mnn.h"
 #include "models/gbdt.h"
 
+#include "models/knn.h"
 #include "models/meta.h"
 
 #endif  //__ALL_MODELS_H_
