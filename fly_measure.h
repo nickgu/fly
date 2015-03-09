@@ -48,7 +48,7 @@ float calc_log_mle(size_t num, ResultPair_t* result) {
     for (size_t i=0; i<num; ++i) {
         float t = result[i].target;
         float o = result[i].output;
-        ret += -(t * save_log(o) + (1.0 - t) * save_log(1-o));
+        ret += -(t * safe_log(o) + (1.0 - t) * safe_log(1-o));
     }
     ret /= num;
     return ret;

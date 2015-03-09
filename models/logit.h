@@ -126,7 +126,7 @@ class LogisticRegression_t
             float loss = 0.0;
             /* Entropy Loss. */
             /*
-            loss = -(item.label * save_log(p) + (1-item.label) * save_log(1-p));
+            loss = -(item.label * safe_log(p) + (1-item.label) * safe_log(1-p));
             */
             /* L2 Loss. */
             loss = 0.5 * (item.label - p) * (item.label - p);

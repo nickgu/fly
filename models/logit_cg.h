@@ -81,7 +81,7 @@ class CG_LogisticRegression_t
                 //loss += 0.5 * (item.label - s) * (item.label - s);
 
                 // cross-entropy.
-                loss += -((1-item.label) * save_log(1-s) + item.label * save_log(s));
+                loss += -((1-item.label) * safe_log(1-s) + item.label * safe_log(s));
             }
 
             loss = loss / _reader->size();

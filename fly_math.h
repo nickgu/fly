@@ -154,7 +154,7 @@ float sparse_dot(int theta_num, float* theta, const FArray_t<IndValue_t>& input)
 }
 
 template<typename T>
-T save_log(T x) {
+T safe_log(T x) {
     if (x < 1e-7) {
         return log(1e-7);
     }

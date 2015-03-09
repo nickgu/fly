@@ -103,14 +103,14 @@ class MultiNN_t :
 
         void _epoch_end() {
             if (_epoch_loss >= _current_loss) {
-                LOG_NOTICE("loss[%f] >= current_loss[%f], recover. lrate=%f", _epoch_loss, _current_loss, _learn_rate_in_use);
+                LOG_NOTICE("loss[%f] >= current_loss[%f], lrate=%f RECOVER.", _epoch_loss, _current_loss, _learn_rate_in_use);
                 _recover_state();
                 _learn_rate_in_use *= 0.5;
                 if (_learn_rate_in_use < 1e-6) {
                     _force_stop = true;
                 }
             } else {
-                LOG_NOTICE("loss[%f] < current_loss[%f], accepted.", _epoch_loss, _current_loss);
+                LOG_NOTICE("loss[%f] < current_loss[%f], lrate=%f ACCEPTED.", _epoch_loss, _current_loss, _learn_rate_in_use);
                 _current_loss = _epoch_loss;
                 _learn_rate_in_use = _learn_rate;
             }
@@ -244,7 +244,12 @@ class MultiNN_t :
         virtual float _update(const Instance_t& item) {
             // forward predict, record output data.
             float new_p = predict(item);
-        
+
+            /*
+            item.write(stderr);
+            LOG_NOTICE("target=%f output=%f", item.label, new_p);
+            */
+
             // back-probagation.
             _delta[_layer_num-1][0] = (item.label - new_p);
             for (int L=_layer_num-1; L>=0; --L) {
@@ -254,8 +259,8 @@ class MultiNN_t :
                 }
 
                 for (size_t O=0; O<_out_num[L]; ++O) {
-                    //float desc = _out[L][O] * (1.0 - _out[L][O]) * _delta[L][O];
                     float desc = _delta[L][O];
+                    //LOG_NOTICE("update @L%d,U%d desc=%f, out=%f", L, O, desc, _out[L][O]);
                     _const[L][O] += desc * _learn_rate_in_use;
                     // update const.
                     if (L == 0) {
@@ -269,15 +274,29 @@ class MultiNN_t :
                             float in = _out[L-1][in_idx];
                             float gradient = desc * in;
 
+                            float old_theta = _ref_theta(L, O, in_idx);
+                            
+                            /*
+                            LOG_NOTICE("delta [%d][%d] : %f -> %f (%f)", 
+                                    L-1, in_idx,
+                                    _delta[L-1][in_idx], 
+                                    _delta[L-1][in_idx] + desc * _ref_theta(L, O, in_idx), 
+                                    desc * _ref_theta(L, O, in_idx));
+                                    */
+
                             _delta[L-1][in_idx] += desc * _ref_theta(L, O, in_idx);
                             _ref_theta(L, O, in_idx) += gradient * _learn_rate_in_use;
+
+                            //LOG_NOTICE(" theta: %f -> %f", old_theta, _ref_theta(L, O, in_idx));
                         }
                     }
                 }
+
+                //getchar();
             }
 
             // calc loss.
-            float loss = -(item.label * save_log(new_p) + (1-item.label) * save_log(1-new_p));
+            float loss = -(item.label * safe_log(new_p) + (1-item.label) * safe_log(1-new_p));
             return loss;
         }
 };
