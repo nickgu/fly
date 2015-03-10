@@ -100,7 +100,6 @@ class MetaModel_t
                     _classifiers[i] = new GBDT_t(conf, sub_section.c_str());
                 }
             }
-
         }
 
         virtual float predict(const Instance_t& ins) const {
@@ -117,7 +116,7 @@ class MetaModel_t
             return best_class;
         }
 
-        virtual void  init(FlyReader_t* reader) {
+        virtual void init(FlyReader_t* reader) {
             _fake_readers = new MultiClassFakeReader_t* [_class_num];
             for (int i=0; i<_class_num; ++i) {
                 _fake_readers[i] = new MultiClassFakeReader_t(reader, i);
@@ -126,17 +125,25 @@ class MetaModel_t
             }
         }
 
-        virtual void  train() {
+        virtual void train() {
             for (int i=0; i<_class_num; ++i) {
                 _fake_readers[i]->reset();
                 _classifiers[i]->train();
             }
         }
 
-        virtual void  write_model(FILE* stream) const {
+        virtual void write_model(FILE* stream) const {
+            fwrite(&_class_num, 1, sizeof(int), stream);
+            for (int i=0; i<_class_num; ++i) {
+                _classifiers[i]->write_model(stream);
+            }
         }
 
-        virtual void  read_model(FILE* stream) {
+        virtual void read_model(FILE* stream) {
+            fread(&_class_num, 1, sizeof(int), stream);
+            for (int i=0; i<_class_num; ++i) {
+                _classifiers[i]->read_model(stream);
+            }
         }
 
     private:
