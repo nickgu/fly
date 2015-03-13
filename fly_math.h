@@ -12,6 +12,9 @@
 #include <cstdio>
 #include <cmath>
 
+#include <cstdlib>
+using namespace std;
+
 #include "fly_core.h"
 
 struct Param_t {
@@ -128,7 +131,7 @@ struct Param_t {
  * Generate a random number between [-0.5, +0.5]
  */
 float random_05() {
-    return (random() % 10000) / 10000.0 - 0.5;
+    return (rand() % 10000) / 10000.0 - 0.5;
 }
 
 float sigmoid(float x) {

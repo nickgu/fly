@@ -16,9 +16,9 @@
 
 #define INVALID_SAME_KEY (0xffffffff)
 
-const unsigned char __1[] = {0x1, 0x2, 0x4, 0x8, 0x10, 0x20, 0x40, 0x80};
-#define SET_1(buf, idx) {(buf)[(idx)>>3] |= __1[(idx)&0x7];}
-#define IS_1(buf, idx) ((buf)[(idx)>>3] & __1[(idx)&0x7])
+const unsigned char ____1[] = {0x1, 0x2, 0x4, 0x8, 0x10, 0x20, 0x40, 0x80};
+#define SET_1(buf, idx) {(buf)[(idx)>>3] |= ____1[(idx)&0x7];}
+#define IS_1(buf, idx) ((buf)[(idx)>>3] & ____1[(idx)&0x7])
 
 int _L(int x) {return x*2+1;}
 int _R(int x) {return x*2+2;}

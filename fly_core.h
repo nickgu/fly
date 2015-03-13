@@ -13,6 +13,9 @@
 
 #include <vector>
 #include <stdexcept>
+
+#include <cstdlib>
+
 using namespace std;
 
 #include <ext/hash_map>

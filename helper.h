@@ -2,6 +2,9 @@
 #ifndef __HELPER_H__
 #define __HELPER_H__
 
+
+
+
 #include <ctime>
 
 #include <vector>
@@ -13,6 +16,9 @@
 
 #include <errno.h>
 #include <pthread.h>
+
+#include <cstdlib>
+using namespace std;
 
 #ifndef LOG_DEBUG
 #define LOG_DEBUG(format, ...) {if (__hidden::is_debug_on()) fprintf(stderr, "DEBUG: " format "\n", ##__VA_ARGS__);}
