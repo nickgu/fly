@@ -14,10 +14,10 @@
 #include <vector>
 #include <stdexcept>
 
+#include <stdint.h>
 #include <cstdlib>
-
+#include <cstring>
 using namespace std;
-
 #include <ext/hash_map>
 using namespace __gnu_cxx;
 

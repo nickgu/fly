@@ -18,6 +18,7 @@
 #include <pthread.h>
 
 #include <cstdlib>
+#include <cstring>
 using namespace std;
 
 #ifndef LOG_DEBUG
