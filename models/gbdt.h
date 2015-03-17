@@ -291,6 +291,13 @@ class GBDT_t
 
         virtual float predict(const Instance_t& ins) const {
             float ret = 0.0f;
+
+            float *feature = new float [_dim_count];
+            memset(feature, 0, sizeof(feature));
+            for (size_t f=0; f<ins.features.size(); ++f) {
+                feature[ins.features[f].index] = ins.features[f].value;
+            }
+
             for (int i=0; i<_tree_count; ++i) {
                 int nid = 0;
                 float expect = 0.0;
@@ -299,13 +306,7 @@ class GBDT_t
                     const TreeNode_t& node = _trees[i][nid];
                     expect = node.mean;
                     if (node.fidx != -1) {
-                        float value = 0;
-                        for (size_t f=0; f<ins.features.size(); ++f) {
-                            if (ins.features[f].index == node.fidx) {
-                                value = ins.features[f].value;
-                                break;
-                            }
-                        }
+                        float value = feature[node.fidx];
                         if (value < node.threshold) {
                             nid = _L(nid);
                         } else {
@@ -317,6 +318,7 @@ class GBDT_t
                 }
                 ret += _sr * expect;
             }
+            delete [] feature;
             return ret;
         }
 
