@@ -13,6 +13,8 @@
 #include <string>
 #include <map>
 #include <stdexcept>
+#include <cstdlib>
+
 using namespace std;
 
 class Config_t {
