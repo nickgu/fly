@@ -232,7 +232,8 @@ class GBDT_t
     public:
         GBDT_t(const Config_t& config, const char* section):
             _ffd(NULL),
-            _sorted_fields(NULL)
+            _sorted_fields(NULL),
+            _predict_buffer(NULL)
         {
             _sample_feature = config.conf_float_default(section, "sample_feature", 1.0);
             _sample_instance = config.conf_float_default(section, "sample_instance", 1.0);
@@ -287,15 +288,21 @@ class GBDT_t
                 delete [] _sorted_fields;
                 _sorted_fields = NULL;
             }
+
+            if (_predict_buffer) {
+                delete [] _predict_buffer;
+            }
         }
 
         virtual float predict(const Instance_t& ins) const {
             float ret = 0.0f;
 
-            float *feature = new float [_dim_count];
-            memset(feature, 0, sizeof(feature));
+            memset(_predict_buffer, 0, sizeof(float) * _dim_count);
+
             for (size_t f=0; f<ins.features.size(); ++f) {
-                feature[ins.features[f].index] = ins.features[f].value;
+                if (ins.features[f].index < _dim_count) {
+                    _predict_buffer[ins.features[f].index] = ins.features[f].value;
+                }
             }
 
             for (int i=0; i<_tree_count; ++i) {
@@ -306,7 +313,7 @@ class GBDT_t
                     const TreeNode_t& node = _trees[i][nid];
                     expect = node.mean;
                     if (node.fidx != -1) {
-                        float value = feature[node.fidx];
+                        float value = _predict_buffer[node.fidx];
                         if (value < node.threshold) {
                             nid = _L(nid);
                         } else {
@@ -318,7 +325,7 @@ class GBDT_t
                 }
                 ret += _sr * expect;
             }
-            delete [] feature;
+
             return ret;
         }
 
@@ -341,13 +348,21 @@ class GBDT_t
             fread(&_sr, 1, sizeof(_sr), stream);
             LOG_NOTICE("LOADING_INFO: _tree_count=%d _tree_size=%d _sr=%f", _tree_count, _tree_size, _sr);
 
+            _dim_count = 0;
             _trees = new TreeNode_t*[_tree_count];
             for (int T=0; T<_tree_count; ++T) {
                 _trees[T] = new TreeNode_t[_tree_size];
                 for (int i=0; i<_tree_size; ++i) {
                     _trees[T][i].read(stream);
+                    if (_dim_count <= _trees[T][i].fidx) {
+                        _dim_count = _trees[T][i].fidx + 1;
+                    }
                 }
             }
+            if (_predict_buffer) {
+                delete [] _predict_buffer;
+            }
+            _predict_buffer = new float[_dim_count];
             return ;
         }
 
@@ -355,7 +370,12 @@ class GBDT_t
             // construct column infomation.
             _reader = reader;
             _item_count = (unsigned)reader->size();
+
             _dim_count = reader->dim();
+            if (_predict_buffer) {
+                delete [] _predict_buffer;
+            }
+            _predict_buffer = new float[_dim_count];
 
             _labels = new ItemInfo_t[_item_count];
             _ffd = new FILE*[_dim_count];
@@ -729,6 +749,7 @@ class GBDT_t
         ItemInfo_t*     _labels;
         FILE**          _ffd;
         SortedIndex_t** _sorted_fields;
+        float*          _predict_buffer;
 
         uint32_t  _item_count;
         int     _dim_count;
