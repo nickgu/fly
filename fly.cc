@@ -246,7 +246,7 @@ int main(int argc, char** argv) {
         c++;
     }
     tm.end();
-    LOG_NOTICE("performance: %.2f sec, qps=%.2f", tm.cost_time(), c*1.0/tm.cost_time());
+    LOG_NOTICE("performance: %.3f sec, qps=%.2f", tm.cost_time(), c*1.0/tm.cost_time());
     if (out_fd) {
         fclose(out_fd);
     }

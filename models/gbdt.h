@@ -105,6 +105,23 @@ struct TreeNode_t {
     }
 };
 
+struct SmallTreeNode_t {
+    // Decision info.
+    short fidx;   // feature index.
+    float threshold;  // threshold.
+
+    void init(size_t b, size_t e) {
+        fidx = -1;
+        threshold = 0;
+    }
+
+    void copy(const TreeNode_t& o) {
+        fidx = o.fidx;
+        threshold = o.threshold;
+    }
+};
+
+
 struct ItemInfo_t {
     double  residual;
     short   in_which_node;
@@ -233,7 +250,9 @@ class GBDT_t
         GBDT_t(const Config_t& config, const char* section):
             _ffd(NULL),
             _sorted_fields(NULL),
-            _predict_buffer(NULL)
+            _predict_buffer(NULL),
+            _compact_trees(NULL),
+            _mean(NULL)
         {
             _sample_feature = config.conf_float_default(section, "sample_feature", 1.0);
             _sample_instance = config.conf_float_default(section, "sample_instance", 1.0);
@@ -252,11 +271,11 @@ class GBDT_t
             LOG_NOTICE("shrinkage=%f", _sr);
 
             _tree_size = 1 << (_max_layer + 2);
+
             _trees = new TreeNode_t*[_tree_count];
             for (int i=0; i<_tree_count; ++i) {
                 _trees[i] = new TreeNode_t[_tree_size];
             }
-
             _labels = NULL;
         }
 
@@ -267,6 +286,21 @@ class GBDT_t
                 }
                 delete [] _trees;
                 _trees = NULL;
+            }
+
+            if (_compact_trees) {
+                for (int i=0; i<_tree_count; ++i) {
+                    delete [] _compact_trees;
+                }
+                delete [] _compact_trees;
+                _compact_trees = NULL;
+            }
+
+            if (_mean) {
+                for (int i=0; i<_tree_count; ++i) {
+                    delete [] _mean[i];
+                }
+                delete [] _mean;
             }
 
             if (_labels) {
@@ -304,27 +338,22 @@ class GBDT_t
                 }
             }
 
-            for (int i=0; i<_tree_count; ++i) {
+            SmallTreeNode_t** end_tree = _compact_trees + _tree_count;
+            for (SmallTreeNode_t** tree=_compact_trees; tree<end_tree; ++tree) {
                 int nid = 0;
-                float expect = 0.0;
-
-                while (nid != -1) {
-                    const TreeNode_t& node = _trees[i][nid];
-                    if (node.fidx != -1) {
-                        float value = _predict_buffer[node.fidx];
-                        if (value < node.threshold) {
-                            nid = _L(nid);
-                        } else {
-                            nid = _R(nid);
+                while (1) {
+                    SmallTreeNode_t* node = (*tree)+nid;
+                    if (node->fidx != -1) {
+                        nid = _L(nid);
+                        if (_predict_buffer[node->fidx] >= node->threshold) {
+                            nid ++;
                         }
                     } else {
-                        expect = node.mean;
                         break;
                     }
                 }
-                ret += _sr * expect;
+                ret += _mean[tree - _compact_trees][nid];
             }
-
             return ret;
         }
 
@@ -348,13 +377,18 @@ class GBDT_t
             LOG_NOTICE("LOADING_INFO: _tree_count=%d _tree_size=%d _sr=%f", _tree_count, _tree_size, _sr);
 
             _dim_count = 0;
-            _trees = new TreeNode_t*[_tree_count];
+            _compact_trees = new SmallTreeNode_t*[_tree_count];
+            _mean = new float*[_tree_count];
+            TreeNode_t temp_node;
             for (int T=0; T<_tree_count; ++T) {
-                _trees[T] = new TreeNode_t[_tree_size];
+                _compact_trees[T] = new SmallTreeNode_t[_tree_size];
+                _mean[T] = new float[_tree_size];
                 for (int i=0; i<_tree_size; ++i) {
-                    _trees[T][i].read(stream);
-                    if (_dim_count <= _trees[T][i].fidx) {
-                        _dim_count = _trees[T][i].fidx + 1;
+                    temp_node.read(stream);
+                    _compact_trees[T][i].copy(temp_node);
+                    _mean[T][i] = temp_node.mean * _sr;
+                    if (_dim_count <= _compact_trees[T][i].fidx) {
+                        _dim_count = _compact_trees[T][i].fidx + 1;
                     }
                 }
             }
@@ -484,22 +518,6 @@ class GBDT_t
                 fread(_sorted_fields[i], _item_count, sizeof(SortedIndex_t), _ffd[i]);
             }
 
-            /*
-            size_t sz = (_item_count + 8) / 8;
-            unsigned char* dedup = new unsigned char[sz];
-            for (int f=0; f<_dim_count; ++f) {
-                memset(dedup, 0, sz);
-                for (int i=0; i<_item_count; ++i) {
-                    if (IS_1(dedup, i)) {
-                        LOG_ERROR("dup: i=%d f=%d", i, f);
-                        exit(-1);
-                    }
-                    SET_1(dedup, i);
-                }
-            }
-            delete [] dedup;
-            */
-
             tm.end();
             LOG_NOTICE("load field time: %.2fs", tm.cost_time());
             return ;
@@ -611,21 +629,6 @@ class GBDT_t
                             }
                         }
                     }
-
-                    /*
-                    map<int, int> tb;
-                    for (int i=0; i<_item_count; ++i) {
-                        tb[iinfo[i].in_which_node] ++;
-                    }
-                    for (int n=beg_node; n<end_node; ++n) {
-                        LOG_NOTICE("after_layer: Tree=%d node=%d beg:%d end:%d fidx=%d", 
-                                T, n, _trees[T][n].begin, _trees[T][n].end, _trees[T][n].fidx);
-                        LOG_NOTICE("        L  : Tree=%d node=%d beg:%d end:%d (alloc=%d)", 
-                                T, _L(n), _trees[T][_L(n)].begin, _trees[T][_L(n)].end, tb[_L(n)]);
-                        LOG_NOTICE("        R  : Tree=%d node=%d beg:%d end:%d (alloc=%d)", 
-                                T, _R(n), _trees[T][_R(n)].begin, _trees[T][_R(n)].end, tb[_R(n)]);
-                    }
-                    */
 
                     for (int i=beg_node; i<end_node; ++i) {
                         if (_trees[T][i].fidx>=0) {
@@ -745,6 +748,7 @@ class GBDT_t
 
         int             _tree_size;
         TreeNode_t**    _trees;  // node buffer.
+
         ItemInfo_t*     _labels;
         FILE**          _ffd;
         SortedIndex_t** _sorted_fields;
@@ -753,6 +757,9 @@ class GBDT_t
         uint32_t  _item_count;
         int     _dim_count;
         size_t  _maximum_memory;
+
+        SmallTreeNode_t** _compact_trees;
+        float**         _mean;
 
         bool _sample(float ratio) const {
             return ((random()%10000) / 10000.0) <= ratio;
