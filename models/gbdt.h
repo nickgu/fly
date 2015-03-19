@@ -298,7 +298,6 @@ class GBDT_t
             float ret = 0.0f;
 
             memset(_predict_buffer, 0, sizeof(float) * _dim_count);
-
             for (size_t f=0; f<ins.features.size(); ++f) {
                 if (ins.features[f].index < _dim_count) {
                     _predict_buffer[ins.features[f].index] = ins.features[f].value;
@@ -311,7 +310,6 @@ class GBDT_t
 
                 while (nid != -1) {
                     const TreeNode_t& node = _trees[i][nid];
-                    expect = node.mean;
                     if (node.fidx != -1) {
                         float value = _predict_buffer[node.fidx];
                         if (value < node.threshold) {
@@ -320,6 +318,7 @@ class GBDT_t
                             nid = _R(nid);
                         }
                     } else {
+                        expect = node.mean;
                         break;
                     }
                 }

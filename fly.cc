@@ -234,6 +234,8 @@ int main(int argc, char** argv) {
     if (output_file) {
         out_fd = fopen(output_file, "w");
     }
+    Timer tm;
+    tm.begin();
     while (treader->read(&item)) {
         //item.write(stderr);
         res_list[c].target = item.label;
@@ -243,6 +245,8 @@ int main(int argc, char** argv) {
         }
         c++;
     }
+    tm.end();
+    LOG_NOTICE("performance: %.2f sec, qps=%.2f", tm.cost_time(), c*1.0/tm.cost_time());
     if (out_fd) {
         fclose(out_fd);
     }
