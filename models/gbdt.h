@@ -248,6 +248,7 @@ class GBDT_t
 
     public:
         GBDT_t(const Config_t& config, const char* section):
+            _trees(NULL),
             _ffd(NULL),
             _sorted_fields(NULL),
             _predict_buffer(NULL),
@@ -272,10 +273,6 @@ class GBDT_t
 
             _tree_size = 1 << (_max_layer + 2);
 
-            _trees = new TreeNode_t*[_tree_count];
-            for (int i=0; i<_tree_count; ++i) {
-                _trees[i] = new TreeNode_t[_tree_size];
-            }
             _labels = NULL;
         }
 
@@ -290,7 +287,7 @@ class GBDT_t
 
             if (_compact_trees) {
                 for (int i=0; i<_tree_count; ++i) {
-                    delete [] _compact_trees;
+                    delete [] _compact_trees[i];
                 }
                 delete [] _compact_trees;
                 _compact_trees = NULL;
@@ -325,6 +322,7 @@ class GBDT_t
 
             if (_predict_buffer) {
                 delete [] _predict_buffer;
+                _predict_buffer = NULL;
             }
         }
 
@@ -394,6 +392,7 @@ class GBDT_t
             }
             if (_predict_buffer) {
                 delete [] _predict_buffer;
+                _predict_buffer = NULL;
             }
             _predict_buffer = new float[_dim_count];
             return ;
@@ -407,6 +406,7 @@ class GBDT_t
             _dim_count = reader->dim();
             if (_predict_buffer) {
                 delete [] _predict_buffer;
+                _predict_buffer = NULL;
             }
             _predict_buffer = new float[_dim_count];
 
@@ -524,6 +524,11 @@ class GBDT_t
         }
 
         virtual void train() {
+            _trees = new TreeNode_t*[_tree_count];
+            for (int i=0; i<_tree_count; ++i) {
+                _trees[i] = new TreeNode_t[_tree_size];
+            }
+
             ItemInfo_t* iinfo = new ItemInfo_t[_item_count];  // [item_id] : residual, in_which_node.
             Job_LayerFeatureProcess_t* jobs = new Job_LayerFeatureProcess_t[_dim_count];
             pthread_t* tids = new pthread_t[_dim_count];
@@ -735,7 +740,6 @@ class GBDT_t
                     _mean[T][i] = _trees[T][i].mean * _sr;
                 }
             }
-
 
             delete [] tids;
             for (int D=0; D<_dim_count; ++D) {
