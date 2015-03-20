@@ -213,12 +213,14 @@ int main(int argc, char** argv) {
         FILE* model_file = fopen(model_save_file, "w");
         model->write_model(model_file);
         fclose(model_file);
+        LOG_NOTICE("Model save completed.");
     }
     if (model_load_file) {
         LOG_NOTICE("Model load from [%s]", model_load_file);
         FILE* model_file = fopen(model_load_file, "r");
         model->read_model(model_file);
         fclose(model_file);
+        LOG_NOTICE("Model load completed.");
     }
  
     // simple test on training set.

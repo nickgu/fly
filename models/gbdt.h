@@ -724,6 +724,19 @@ class GBDT_t
                 }
             }
 
+            // copy tree to compact_tree.
+            _compact_trees = new SmallTreeNode_t*[_tree_count];
+            _mean = new float*[_tree_count];
+            for (int T=0; T<_tree_count; ++T) {
+                _compact_trees[T] = new SmallTreeNode_t[_tree_size];
+                _mean[T] = new float[_tree_size];
+                for (int i=0; i<_tree_size; ++i) {
+                    _compact_trees[T][i].copy(_trees[T][i]);
+                    _mean[T][i] = _trees[T][i].mean * _sr;
+                }
+            }
+
+
             delete [] tids;
             for (int D=0; D<_dim_count; ++D) {
                 delete [] jobs[D].tree;
@@ -764,7 +777,6 @@ class GBDT_t
         bool _sample(float ratio) const {
             return ((random()%10000) / 10000.0) <= ratio;
         }
-
 };
 
 #endif  //__GBDT_H_
