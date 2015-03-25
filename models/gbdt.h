@@ -39,7 +39,7 @@ struct TreeNode_t {
     double mean;     // predict value.
 
     // Training info.
-    float score;    // mse score.
+    float score;    // mse delta.
     int begin;
     int end;
     int cnt;
@@ -253,7 +253,8 @@ class GBDT_t
             _sorted_fields(NULL),
             _predict_buffer(NULL),
             _compact_trees(NULL),
-            _mean(NULL)
+            _mean(NULL),
+            _feature_weight(NULL)
         {
             _sample_feature = config.conf_float_default(section, "sample_feature", 1.0);
             _sample_instance = config.conf_float_default(section, "sample_instance", 1.0);
@@ -277,6 +278,10 @@ class GBDT_t
         }
 
         virtual ~GBDT_t() {
+            if (_feature_weight) {
+                delete [] _feature_weight;
+                _feature_weight = NULL;
+            }
             if (_trees) {
                 for (int i=0; i<_tree_count; ++i) {
                     delete [] _trees[i];
@@ -404,6 +409,11 @@ class GBDT_t
             _item_count = (unsigned)reader->size();
 
             _dim_count = reader->dim();
+            if (_feature_weight) {
+                delete [] _feature_weight;
+            }
+            _feature_weight = new float[_dim_count];
+            memset(_feature_weight, 0, sizeof(float)*_dim_count);
             if (_predict_buffer) {
                 delete [] _predict_buffer;
                 _predict_buffer = NULL;
@@ -616,6 +626,9 @@ class GBDT_t
                     for (int n=beg_node; n<end_node; ++n) {
                         TreeNode_t& node = _trees[T][n];
                         if (node.fidx != -1) {
+                            // accumlulate the score to the feature weight.
+                            _feature_weight[node.fidx] += _trees[T][n].score;
+
                             _trees[T][_L(n)].init(node.begin, node.split);
                             _trees[T][_R(n)].init(node.split, node.end);
                             for (int i=_trees[T][_L(n)].begin; i<_trees[T][_L(n)].end; ++i) {
@@ -651,6 +664,11 @@ class GBDT_t
                             post_tm.cost_time(),
                             total_tm
                         );
+
+                    // dump feature weight at each layer's ending.
+                    for (int i=0; i<_dim_count; ++i) {
+                        LOG_NOTICE("FWeight:\tT:%d\tL:%d\tF:%d\t%.5f", T, L, i, _feature_weight[i]);
+                    }
 
                     // one layer forward.
                     beg_node = end_node;
@@ -777,6 +795,9 @@ class GBDT_t
 
         SmallTreeNode_t** _compact_trees;
         float**         _mean;
+
+        // debug feature weight.
+        float  *_feature_weight;
 
         bool _sample(float ratio) const {
             return ((random()%10000) / 10000.0) <= ratio;
