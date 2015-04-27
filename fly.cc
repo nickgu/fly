@@ -213,12 +213,14 @@ int main(int argc, char** argv) {
         FILE* model_file = fopen(model_save_file, "w");
         model->write_model(model_file);
         fclose(model_file);
+        LOG_NOTICE("Model save completed.");
     }
     if (model_load_file) {
         LOG_NOTICE("Model load from [%s]", model_load_file);
         FILE* model_file = fopen(model_load_file, "r");
         model->read_model(model_file);
         fclose(model_file);
+        LOG_NOTICE("Model load completed.");
     }
  
     // simple test on training set.
@@ -234,6 +236,8 @@ int main(int argc, char** argv) {
     if (output_file) {
         out_fd = fopen(output_file, "w");
     }
+    Timer tm;
+    tm.begin();
     while (treader->read(&item)) {
         //item.write(stderr);
         res_list[c].target = item.label;
@@ -243,6 +247,8 @@ int main(int argc, char** argv) {
         }
         c++;
     }
+    tm.end();
+    LOG_NOTICE("performance: %.3f sec, qps=%.2f", tm.cost_time(), c*1.0/tm.cost_time());
     if (out_fd) {
         fclose(out_fd);
     }

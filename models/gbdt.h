@@ -39,7 +39,7 @@ struct TreeNode_t {
     double mean;     // predict value.
 
     // Training info.
-    float score;    // mse score.
+    float score;    // mse delta.
     int begin;
     int end;
     int cnt;
@@ -104,6 +104,23 @@ struct TreeNode_t {
         return string(buf);
     }
 };
+
+struct SmallTreeNode_t {
+    // Decision info.
+    short fidx;   // feature index.
+    float threshold;  // threshold.
+
+    void init(size_t b, size_t e) {
+        fidx = -1;
+        threshold = 0;
+    }
+
+    void copy(const TreeNode_t& o) {
+        fidx = o.fidx;
+        threshold = o.threshold;
+    }
+};
+
 
 struct ItemInfo_t {
     double  residual;
@@ -231,8 +248,13 @@ class GBDT_t
 
     public:
         GBDT_t(const Config_t& config, const char* section):
+            _trees(NULL),
             _ffd(NULL),
-            _sorted_fields(NULL)
+            _sorted_fields(NULL),
+            _predict_buffer(NULL),
+            _compact_trees(NULL),
+            _mean(NULL),
+            _feature_weight(NULL)
         {
             _sample_feature = config.conf_float_default(section, "sample_feature", 1.0);
             _sample_instance = config.conf_float_default(section, "sample_instance", 1.0);
@@ -251,21 +273,36 @@ class GBDT_t
             LOG_NOTICE("shrinkage=%f", _sr);
 
             _tree_size = 1 << (_max_layer + 2);
-            _trees = new TreeNode_t*[_tree_count];
-            for (int i=0; i<_tree_count; ++i) {
-                _trees[i] = new TreeNode_t[_tree_size];
-            }
 
             _labels = NULL;
         }
 
         virtual ~GBDT_t() {
+            if (_feature_weight) {
+                delete [] _feature_weight;
+                _feature_weight = NULL;
+            }
             if (_trees) {
                 for (int i=0; i<_tree_count; ++i) {
                     delete [] _trees[i];
                 }
                 delete [] _trees;
                 _trees = NULL;
+            }
+
+            if (_compact_trees) {
+                for (int i=0; i<_tree_count; ++i) {
+                    delete [] _compact_trees[i];
+                }
+                delete [] _compact_trees;
+                _compact_trees = NULL;
+            }
+
+            if (_mean) {
+                for (int i=0; i<_tree_count; ++i) {
+                    delete [] _mean[i];
+                }
+                delete [] _mean;
             }
 
             if (_labels) {
@@ -287,35 +324,38 @@ class GBDT_t
                 delete [] _sorted_fields;
                 _sorted_fields = NULL;
             }
+
+            if (_predict_buffer) {
+                delete [] _predict_buffer;
+                _predict_buffer = NULL;
+            }
         }
 
         virtual float predict(const Instance_t& ins) const {
             float ret = 0.0f;
-            for (int i=0; i<_tree_count; ++i) {
-                int nid = 0;
-                float expect = 0.0;
 
-                while (nid != -1) {
-                    const TreeNode_t& node = _trees[i][nid];
-                    expect = node.mean;
-                    if (node.fidx != -1) {
-                        float value = 0;
-                        for (size_t f=0; f<ins.features.size(); ++f) {
-                            if (ins.features[f].index == node.fidx) {
-                                value = ins.features[f].value;
-                                break;
-                            }
-                        }
-                        if (value < node.threshold) {
-                            nid = _L(nid);
-                        } else {
-                            nid = _R(nid);
+            memset(_predict_buffer, 0, sizeof(float) * _dim_count);
+            for (size_t f=0; f<ins.features.size(); ++f) {
+                if (ins.features[f].index < _dim_count) {
+                    _predict_buffer[ins.features[f].index] = ins.features[f].value;
+                }
+            }
+
+            SmallTreeNode_t** end_tree = _compact_trees + _tree_count;
+            for (SmallTreeNode_t** tree=_compact_trees; tree<end_tree; ++tree) {
+                int nid = 0;
+                while (1) {
+                    SmallTreeNode_t* node = (*tree)+nid;
+                    if (node->fidx != -1) {
+                        nid = _L(nid);
+                        if (_predict_buffer[node->fidx] >= node->threshold) {
+                            nid ++;
                         }
                     } else {
                         break;
                     }
                 }
-                ret += _sr * expect;
+                ret += _mean[tree - _compact_trees][nid];
             }
             return ret;
         }
@@ -339,13 +379,27 @@ class GBDT_t
             fread(&_sr, 1, sizeof(_sr), stream);
             LOG_NOTICE("LOADING_INFO: _tree_count=%d _tree_size=%d _sr=%f", _tree_count, _tree_size, _sr);
 
-            _trees = new TreeNode_t*[_tree_count];
+            _dim_count = 0;
+            _compact_trees = new SmallTreeNode_t*[_tree_count];
+            _mean = new float*[_tree_count];
+            TreeNode_t temp_node;
             for (int T=0; T<_tree_count; ++T) {
-                _trees[T] = new TreeNode_t[_tree_size];
+                _compact_trees[T] = new SmallTreeNode_t[_tree_size];
+                _mean[T] = new float[_tree_size];
                 for (int i=0; i<_tree_size; ++i) {
-                    _trees[T][i].read(stream);
+                    temp_node.read(stream);
+                    _compact_trees[T][i].copy(temp_node);
+                    _mean[T][i] = temp_node.mean * _sr;
+                    if (_dim_count <= _compact_trees[T][i].fidx) {
+                        _dim_count = _compact_trees[T][i].fidx + 1;
+                    }
                 }
             }
+            if (_predict_buffer) {
+                delete [] _predict_buffer;
+                _predict_buffer = NULL;
+            }
+            _predict_buffer = new float[_dim_count];
             return ;
         }
 
@@ -353,7 +407,18 @@ class GBDT_t
             // construct column infomation.
             _reader = reader;
             _item_count = (unsigned)reader->size();
+
             _dim_count = reader->dim();
+            if (_feature_weight) {
+                delete [] _feature_weight;
+            }
+            _feature_weight = new float[_dim_count];
+            memset(_feature_weight, 0, sizeof(float)*_dim_count);
+            if (_predict_buffer) {
+                delete [] _predict_buffer;
+                _predict_buffer = NULL;
+            }
+            _predict_buffer = new float[_dim_count];
 
             _labels = new ItemInfo_t[_item_count];
             _ffd = new FILE*[_dim_count];
@@ -463,28 +528,17 @@ class GBDT_t
                 fread(_sorted_fields[i], _item_count, sizeof(SortedIndex_t), _ffd[i]);
             }
 
-            /*
-            size_t sz = (_item_count + 8) / 8;
-            unsigned char* dedup = new unsigned char[sz];
-            for (int f=0; f<_dim_count; ++f) {
-                memset(dedup, 0, sz);
-                for (int i=0; i<_item_count; ++i) {
-                    if (IS_1(dedup, i)) {
-                        LOG_ERROR("dup: i=%d f=%d", i, f);
-                        exit(-1);
-                    }
-                    SET_1(dedup, i);
-                }
-            }
-            delete [] dedup;
-            */
-
             tm.end();
             LOG_NOTICE("load field time: %.2fs", tm.cost_time());
             return ;
         }
 
         virtual void train() {
+            _trees = new TreeNode_t*[_tree_count];
+            for (int i=0; i<_tree_count; ++i) {
+                _trees[i] = new TreeNode_t[_tree_size];
+            }
+
             ItemInfo_t* iinfo = new ItemInfo_t[_item_count];  // [item_id] : residual, in_which_node.
             Job_LayerFeatureProcess_t* jobs = new Job_LayerFeatureProcess_t[_dim_count];
             pthread_t* tids = new pthread_t[_dim_count];
@@ -572,6 +626,9 @@ class GBDT_t
                     for (int n=beg_node; n<end_node; ++n) {
                         TreeNode_t& node = _trees[T][n];
                         if (node.fidx != -1) {
+                            // accumlulate the score to the feature weight.
+                            _feature_weight[node.fidx] += _trees[T][n].score;
+
                             _trees[T][_L(n)].init(node.begin, node.split);
                             _trees[T][_R(n)].init(node.split, node.end);
                             for (int i=_trees[T][_L(n)].begin; i<_trees[T][_L(n)].end; ++i) {
@@ -591,21 +648,6 @@ class GBDT_t
                         }
                     }
 
-                    /*
-                    map<int, int> tb;
-                    for (int i=0; i<_item_count; ++i) {
-                        tb[iinfo[i].in_which_node] ++;
-                    }
-                    for (int n=beg_node; n<end_node; ++n) {
-                        LOG_NOTICE("after_layer: Tree=%d node=%d beg:%d end:%d fidx=%d", 
-                                T, n, _trees[T][n].begin, _trees[T][n].end, _trees[T][n].fidx);
-                        LOG_NOTICE("        L  : Tree=%d node=%d beg:%d end:%d (alloc=%d)", 
-                                T, _L(n), _trees[T][_L(n)].begin, _trees[T][_L(n)].end, tb[_L(n)]);
-                        LOG_NOTICE("        R  : Tree=%d node=%d beg:%d end:%d (alloc=%d)", 
-                                T, _R(n), _trees[T][_R(n)].begin, _trees[T][_R(n)].end, tb[_R(n)]);
-                    }
-                    */
-
                     for (int i=beg_node; i<end_node; ++i) {
                         if (_trees[T][i].fidx>=0) {
                             if (all_node_count<=_R(i)) {
@@ -622,6 +664,11 @@ class GBDT_t
                             post_tm.cost_time(),
                             total_tm
                         );
+
+                    // dump feature weight at each layer's ending.
+                    for (int i=0; i<_dim_count; ++i) {
+                        LOG_NOTICE("FWeight:\tT:%d\tL:%d\tF:%d\t%.5f", T, L, i, _feature_weight[i]);
+                    }
 
                     // one layer forward.
                     beg_node = end_node;
@@ -700,6 +747,18 @@ class GBDT_t
                 }
             }
 
+            // copy tree to compact_tree.
+            _compact_trees = new SmallTreeNode_t*[_tree_count];
+            _mean = new float*[_tree_count];
+            for (int T=0; T<_tree_count; ++T) {
+                _compact_trees[T] = new SmallTreeNode_t[_tree_size];
+                _mean[T] = new float[_tree_size];
+                for (int i=0; i<_tree_size; ++i) {
+                    _compact_trees[T][i].copy(_trees[T][i]);
+                    _mean[T][i] = _trees[T][i].mean * _sr;
+                }
+            }
+
             delete [] tids;
             for (int D=0; D<_dim_count; ++D) {
                 delete [] jobs[D].tree;
@@ -724,18 +783,25 @@ class GBDT_t
 
         int             _tree_size;
         TreeNode_t**    _trees;  // node buffer.
+
         ItemInfo_t*     _labels;
         FILE**          _ffd;
         SortedIndex_t** _sorted_fields;
+        float*          _predict_buffer;
 
         uint32_t  _item_count;
         int     _dim_count;
         size_t  _maximum_memory;
 
+        SmallTreeNode_t** _compact_trees;
+        float**         _mean;
+
+        // debug feature weight.
+        float  *_feature_weight;
+
         bool _sample(float ratio) const {
             return ((random()%10000) / 10000.0) <= ratio;
         }
-
 };
 
 #endif  //__GBDT_H_
