@@ -65,11 +65,7 @@ struct Instance_t {
                 if (iv.index >= 0) {
                     features.push_back(iv);
                 }
-                else
-                {
-                    iv.index = features.size();
-                    features.push_back(iv);
-                }
+
                 iv.index = -1;
                 begin = i + 1;
             }
