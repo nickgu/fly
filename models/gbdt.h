@@ -16,12 +16,12 @@
 
 #define INVALID_SAME_KEY (0xffffffff)
 
-const unsigned char ____1[] = {0x1, 0x2, 0x4, 0x8, 0x10, 0x20, 0x40, 0x80};
-#define SET_1(buf, idx) {(buf)[(idx)>>3] |= ____1[(idx)&0x7];}
-#define IS_1(buf, idx) ((buf)[(idx)>>3] & ____1[(idx)&0x7])
-
 int _L(int x) {return x*2+1;}
 int _R(int x) {return x*2+2;}
+
+int sample_const = 0;
+int sample_threshold = 256;
+#define ITEM_SAMPLE(idx) (int(((idx + sample_const)*79) & 0xff) <= sample_threshold)
 
 struct SortedIndex_t {
     /*
@@ -123,7 +123,7 @@ struct SmallTreeNode_t {
 
 
 struct ItemInfo_t {
-    double  residual;
+    float   residual;
     short   in_which_node;
 };
 
@@ -137,13 +137,19 @@ struct Job_LayerFeatureProcess_t {
 
     const SortedIndex_t* finfo;
     const ItemInfo_t* iinfo;
-    const unsigned char* item_sample;
     TreeNode_t* tree;
-    SortedIndex_t* calc_last_layer;
+    uint32_t* calc_last_layer;
 };
 
-float __mid_rmse_score(float la, int lc, float ra, int rc)
+inline float __mid_rmse_score(float la, int lc, float ra, int rc)
 {
+    /**
+     * la : left average.
+     * lc : left count.
+     * ra : right average.
+     * rc : right count.
+     */
+
     float ret=0;
     if (lc>0) ret += la/lc*la;
     if (rc>0) ret += ra/rc*ra;
@@ -154,7 +160,7 @@ void* __worker_layer_processor(void* input) {
     Timer ta;
 
     Job_LayerFeatureProcess_t& job= *(Job_LayerFeatureProcess_t*)input;
-    SortedIndex_t* dim_id_sorted = job.calc_last_layer;
+    uint32_t* dim_id_sorted = job.calc_last_layer;
     if (!job.selected) {
         pthread_exit(0);
     }
@@ -176,24 +182,21 @@ void* __worker_layer_processor(void* input) {
     uint32_t same_key = INVALID_SAME_KEY;
     for (uint32_t i=0; i<job.item_count; ++i) {
         SortedIndex_t si = job.finfo[i];
-        short nid = job.iinfo[ si.index ].in_which_node;
 
-        if (!si.same) { // first index of continuous same value.
-            same_key = INVALID_SAME_KEY;
+        if (!si.same) { 
+            // set same_key as 
+            // first index of continuous same value.
+            same_key = i;
         }
+        
         // sample out not useful data.
-        if (!IS_1(job.item_sample, si.index)) {
+        if ( !ITEM_SAMPLE(si.index) ) {
             continue;
         }
 
-        TreeNode_t& nod = job.tree[nid];
-        if (si.same) {
-            if (nod.same_key != same_key) {
-                // set this as same key.
-                nod.same_key = same_key;
-                si.same = 0;
-            } 
-        } else {
+        TreeNode_t& nod = job.tree[ job.iinfo[ si.index ].in_which_node ];
+        if (!si.same || nod.same_key!=same_key) { 
+            nod.same_key = same_key;
             float temp_score = __mid_rmse_score(
                     nod.temp_sum, nod.grow-nod.begin,
                     nod.sum-nod.temp_sum, nod.end-nod.grow);
@@ -204,14 +207,8 @@ void* __worker_layer_processor(void* input) {
                 nod.split_id = si.index;
             }
         }
-
         nod.temp_sum += job.iinfo[ si.index ].residual;
-
-        if (nod.grow>=nod.end) {
-            LOG_ERROR("ERROR_ACCESS! nod_id=%d grow=%d end=%d", nid, nod.grow, nod.end);
-            exit(-1);
-        }
-        dim_id_sorted[ nod.grow++ ] = si;
+        dim_id_sorted[ nod.grow++ ] = si.index;
     }
     for (int n=job.beg_node; n<job.end_node; ++n) {
         TreeNode_t& node = job.tree[n];
@@ -254,7 +251,8 @@ class GBDT_t
             _predict_buffer(NULL),
             _compact_trees(NULL),
             _mean(NULL),
-            _feature_weight(NULL)
+            _feature_weight(NULL),
+            _output_feature_weight(false)
         {
             _sample_feature = config.conf_float_default(section, "sample_feature", 1.0);
             _sample_instance = config.conf_float_default(section, "sample_instance", 1.0);
@@ -272,12 +270,19 @@ class GBDT_t
             _sr = config.conf_float_default(section, "shrinkage", 0.3);
             LOG_NOTICE("shrinkage=%f", _sr);
 
+            _output_feature_weight = config.conf_int_default(section, "output_feature_weight", 0);
+            LOG_NOTICE("output_feature_weight=%d", _output_feature_weight);
+
+            _feature_begin_at_0 = config.conf_int_default(section, "feature_begin_at_0", 1);
+            LOG_NOTICE("feature_begin_at_0=%d", _feature_begin_at_0);
+
             _tree_size = 1 << (_max_layer + 2);
 
             _labels = NULL;
         }
 
         virtual ~GBDT_t() {
+            LOG_NOTICE("Destroy work for GBDT begins.");
             if (_feature_weight) {
                 delete [] _feature_weight;
                 _feature_weight = NULL;
@@ -329,6 +334,7 @@ class GBDT_t
                 delete [] _predict_buffer;
                 _predict_buffer = NULL;
             }
+            LOG_NOTICE("Destroy work for GBDT ends");
         }
 
         virtual float predict(const Instance_t& ins) const {
@@ -543,12 +549,9 @@ class GBDT_t
             Job_LayerFeatureProcess_t* jobs = new Job_LayerFeatureProcess_t[_dim_count];
             pthread_t* tids = new pthread_t[_dim_count];
 
-            size_t item_sample_buffer_size = (_item_count + 8)>>3;
-            unsigned char* is_item_selected = new unsigned char[item_sample_buffer_size];
-
             for (int D=0; D<_dim_count; ++D) {
                 jobs[D].tree = new TreeNode_t[_tree_size];
-                jobs[D].calc_last_layer = new SortedIndex_t[_item_count];
+                jobs[D].calc_last_layer = new uint32_t[_item_count];
             }
             // initialize target.
             for (size_t i=0; i<_item_count; ++i) {
@@ -567,12 +570,12 @@ class GBDT_t
                 int all_node_count = 1;
 
                 sample_tm.begin();
-                memset(is_item_selected, 0, sizeof(unsigned char)*item_sample_buffer_size);
+                sample_const = T * 7;
+                sample_threshold = int(256 * _sample_instance);
                 size_t sample_item_count = 0;
                 for (size_t i=0; i<_item_count; ++i) {
                     iinfo[i].in_which_node = 0;
-                    if (_sample(_sample_instance)) {
-                        SET_1(is_item_selected, i);
+                    if ( ITEM_SAMPLE(i) ) {
                         sample_item_count += 1;
                         root.sum += iinfo[i].residual;
                         root.square_sum += iinfo[i].residual * iinfo[i].residual;
@@ -594,10 +597,17 @@ class GBDT_t
                     Timer multi_tm, post_tm;
 
                     multi_tm.begin();
+                    int selected_feature_count = 0;
                     for (int D=0; D<_dim_count; ++D) {
                         // sample features.
                         jobs[D].selected = false;
-                        if (_sample(_sample_feature)) {
+                        // skip feature 0 on some case.
+                        if (!_feature_begin_at_0 && D==0) {
+                            continue;
+                        }
+                        if (_sample(_sample_feature) 
+                                && selected_feature_count<_dim_count*_sample_feature) 
+                        {
                             jobs[D].selected = true;
                             jobs[D].item_count = _item_count;
                             jobs[D].feature_index = D;
@@ -605,10 +615,11 @@ class GBDT_t
                             jobs[D].end_node = end_node;
                             jobs[D].all_node_count = all_node_count;
 
-                            jobs[D].item_sample = is_item_selected;
                             jobs[D].finfo = _sorted_fields[D];
                             jobs[D].iinfo = iinfo;
                             memcpy(jobs[D].tree, _trees[T], _tree_size * sizeof(TreeNode_t));
+
+                            selected_feature_count ++;
                         }
                     }
                     multi_thread_jobs(__worker_layer_processor, jobs, _dim_count, _thread_num);
@@ -631,20 +642,27 @@ class GBDT_t
 
                             _trees[T][_L(n)].init(node.begin, node.split);
                             _trees[T][_R(n)].init(node.split, node.end);
+                            double sum = 0;
+                            double ssum = 0;
                             for (int i=_trees[T][_L(n)].begin; i<_trees[T][_L(n)].end; ++i) {
-                                uint32_t id = jobs[node.fidx].calc_last_layer[i].index;
+                                uint32_t id = jobs[node.fidx].calc_last_layer[i];
                                 float d = iinfo[id].residual;
                                 iinfo[id].in_which_node = _L(n);
-                                _trees[T][_L(n)].sum += d;
-                                _trees[T][_L(n)].square_sum += d*d;
+                                sum += d;
+                                ssum += d*d;
                             }
+                            _trees[T][_L(n)].sum = sum;
+                            _trees[T][_L(n)].square_sum = ssum;
+                            sum = ssum = 0;
                             for (int i=_trees[T][_R(n)].begin; i<_trees[T][_R(n)].end; ++i) {
-                                uint32_t id = jobs[node.fidx].calc_last_layer[i].index;
+                                uint32_t id = jobs[node.fidx].calc_last_layer[i];
                                 float d = iinfo[id].residual;
                                 iinfo[id].in_which_node = _R(n);
-                                _trees[T][_R(n)].sum += d;
-                                _trees[T][_R(n)].square_sum += d*d;
+                                sum += d;
+                                ssum += d*d;
                             }
+                            _trees[T][_R(n)].sum = sum;
+                            _trees[T][_R(n)].square_sum = ssum;
                         }
                     }
 
@@ -666,8 +684,10 @@ class GBDT_t
                         );
 
                     // dump feature weight at each layer's ending.
-                    for (int i=0; i<_dim_count; ++i) {
-                        LOG_NOTICE("FWeight:\tT:%d\tL:%d\tF:%d\t%.5f", T, L, i, _feature_weight[i]);
+                    if (_output_feature_weight) {
+                        for (int i=0; i<_dim_count; ++i) {
+                            LOG_NOTICE("FWeight:\tT:%d\tL:%d\tF:%d\t%.5f", T, L, i, _feature_weight[i]);
+                        }
                     }
 
                     // one layer forward.
@@ -687,7 +707,7 @@ class GBDT_t
                 // update residual.
                 for (uint32_t i=0; i<_item_count; ++i) {
                     // sample out.
-                    if (!IS_1(is_item_selected, i)) {
+                    if (!ITEM_SAMPLE(i)) {
                         continue;
                     }
                     float predict_value = _trees[T][iinfo[i].in_which_node].mean;
@@ -766,7 +786,6 @@ class GBDT_t
             }
             delete [] jobs;
             delete [] iinfo;
-            delete [] is_item_selected;
         }
 
     private:
@@ -798,6 +817,8 @@ class GBDT_t
 
         // debug feature weight.
         float  *_feature_weight;
+        bool    _output_feature_weight;
+        bool    _feature_begin_at_0;
 
         bool _sample(float ratio) const {
             return ((random()%10000) / 10000.0) <= ratio;

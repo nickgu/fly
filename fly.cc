@@ -223,53 +223,52 @@ int main(int argc, char** argv) {
         LOG_NOTICE("Model load completed.");
     }
  
-    // simple test on training set.
-    FlyReader_t *treader = train_data_reader;
+    // simple test.
+    FlyReader_t *treader = NULL;
     if (test_data_reader != NULL) {
+        LOG_NOTICE("Training over. Begin to test!");
         treader = test_data_reader;
-    }
-    treader->reset();
-    int c = 0;
-    Instance_t item;
-    ResultPair_t* res_list = new ResultPair_t [treader->size()];
-    FILE* out_fd = NULL;
-    if (output_file) {
-        out_fd = fopen(output_file, "w");
-    }
-    Timer tm;
-    tm.begin();
-    while (treader->read(&item)) {
-        //item.write(stderr);
-        res_list[c].target = item.label;
-        res_list[c].output = model->predict(item);
-        if (out_fd) {
-            fprintf(out_fd, "%f\t%f\n", res_list[c].target, res_list[c].output);
+        treader->reset();
+        int c = 0;
+        Instance_t item;
+        ResultPair_t* res_list = new ResultPair_t [treader->size()];
+        FILE* out_fd = NULL;
+        if (output_file) {
+            out_fd = fopen(output_file, "w");
         }
-        c++;
-    }
-    tm.end();
-    LOG_NOTICE("performance: %.3f sec, qps=%.2f", tm.cost_time(), c*1.0/tm.cost_time());
-    if (out_fd) {
-        fclose(out_fd);
-    }
-    LOG_NOTICE("auc: %.6f", calc_auc(c, res_list));
-    LOG_NOTICE("logMLE: %.6f", calc_log_mle(c, res_list));
-    float rmse = calc_rmse(c, res_list);
-    LOG_NOTICE("rmse: %f, mse=%f", rmse, rmse*rmse);
-    LOG_NOTICE("confussion: %s", calc_confussion_matrix(c, res_list).str().c_str());
+        Timer tm;
+        tm.begin();
+        while (treader->read(&item)) {
+            //item.write(stderr);
+            res_list[c].target = item.label;
+            res_list[c].output = model->predict(item);
+            if (out_fd) {
+                fprintf(out_fd, "%f\t%f\n", res_list[c].target, res_list[c].output);
+            }
+            c++;
+        }
+        tm.end();
+        LOG_NOTICE("performance: %.3f sec, qps=%.2f", tm.cost_time(), c*1.0/tm.cost_time());
+        if (out_fd) {
+            fclose(out_fd);
+        }
+        LOG_NOTICE("auc: %.6f", calc_auc(c, res_list));
+        LOG_NOTICE("logMLE: %.6f", calc_log_mle(c, res_list));
+        float rmse = calc_rmse(c, res_list);
+        LOG_NOTICE("rmse: %f, mse=%f", rmse, rmse*rmse);
+        LOG_NOTICE("confussion: %s", calc_confussion_matrix(c, res_list).str().c_str());
 
-    int error = calc_error(c, res_list);
-    LOG_NOTICE("error: %d/%d (%.2f%%)", error, c, error*100.0/c);
+        int error = calc_error(c, res_list);
+        LOG_NOTICE("error: %d/%d (%.2f%%)", error, c, error*100.0/c);
 
-    delete [] res_list;
-    
+        delete [] res_list;
+        delete test_data_reader;
+        test_data_reader = NULL;
+    }
+
     if (train_data_reader) {
         delete train_data_reader;
         train_data_reader = NULL;
-    }
-    if (test_data_reader) {
-        delete test_data_reader;
-        test_data_reader = NULL;
     }
     delete model;
     return 0;
