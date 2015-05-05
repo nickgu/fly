@@ -208,6 +208,7 @@ class BinaryFeatureReader_t
         }
 
         virtual void set(const char* filename, bool preprocess=false) {
+            LOG_NOTICE("BinaryReader open [%s]", filename);
             _stream = fopen(filename, "rb");
             if (_stream == NULL) {
                 throw std::runtime_error(string("Cannot open file : ") + string(filename));
@@ -392,6 +393,7 @@ class FeatureReader_t
         }
 
         virtual void set(const char* filename, bool preprocess=false) {
+            LOG_NOTICE("TextFeatureReader open [%s]", filename);
             _preprocess = preprocess;
             _stream = fopen(filename, "r");
             if (_stream == NULL) {

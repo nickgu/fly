@@ -14,6 +14,7 @@ all: clean $(TARGET)
 	@echo 'MAKE: ALL'
 	mkdir output
 	mv $(TARGET) output
+	cp -r sample_conf output
 
 fly: fly.cc
 	@echo 'MAKE: FLY'

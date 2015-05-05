@@ -180,7 +180,9 @@ void* __worker_layer_processor(void* input) {
     // critical time demand.
     // make sort step over. in O(n)
     uint32_t same_key = INVALID_SAME_KEY;
-    for (uint32_t i=0; i<job.item_count; ++i) {
+    const ItemInfo_t* iinfo = job.iinfo;
+    uint32_t item_count = job.item_count;
+    for (uint32_t i=0; i<item_count; ++i) {
         SortedIndex_t si = job.finfo[i];
 
         if (!si.same) { 
@@ -207,7 +209,7 @@ void* __worker_layer_processor(void* input) {
                 nod.split_id = si.index;
             }
         }
-        nod.temp_sum += job.iinfo[ si.index ].residual;
+        nod.temp_sum += iinfo[ si.index ].residual;
         dim_id_sorted[ nod.grow++ ] = si.index;
     }
     for (int n=job.beg_node; n<job.end_node; ++n) {
@@ -252,7 +254,8 @@ class GBDT_t
             _compact_trees(NULL),
             _mean(NULL),
             _feature_weight(NULL),
-            _output_feature_weight(false)
+            _output_feature_weight(false),
+            _predict_tree_cut(-1)
         {
             _sample_feature = config.conf_float_default(section, "sample_feature", 1.0);
             _sample_instance = config.conf_float_default(section, "sample_instance", 1.0);
@@ -337,6 +340,10 @@ class GBDT_t
             LOG_NOTICE("Destroy work for GBDT ends");
         }
 
+        void set_predict_tree_cut(int N=-1) {
+            _predict_tree_cut = N;
+        }
+
         virtual float predict(const Instance_t& ins) const {
             float ret = 0.0f;
 
@@ -348,7 +355,13 @@ class GBDT_t
             }
 
             SmallTreeNode_t** end_tree = _compact_trees + _tree_count;
+            int tc = 0;
             for (SmallTreeNode_t** tree=_compact_trees; tree<end_tree; ++tree) {
+                if (_predict_tree_cut>=0 && tc>=_predict_tree_cut) {
+                    break;
+                }
+                tc++;
+
                 int nid = 0;
                 while (1) {
                     SmallTreeNode_t* node = (*tree)+nid;
@@ -644,7 +657,9 @@ class GBDT_t
                             _trees[T][_R(n)].init(node.split, node.end);
                             double sum = 0;
                             double ssum = 0;
-                            for (int i=_trees[T][_L(n)].begin; i<_trees[T][_L(n)].end; ++i) {
+                            int b = _trees[T][_L(n)].begin;
+                            int e = _trees[T][_L(n)].end;
+                            for (int i=b; i<e; ++i) {
                                 uint32_t id = jobs[node.fidx].calc_last_layer[i];
                                 float d = iinfo[id].residual;
                                 iinfo[id].in_which_node = _L(n);
@@ -654,7 +669,9 @@ class GBDT_t
                             _trees[T][_L(n)].sum = sum;
                             _trees[T][_L(n)].square_sum = ssum;
                             sum = ssum = 0;
-                            for (int i=_trees[T][_R(n)].begin; i<_trees[T][_R(n)].end; ++i) {
+                            b = _trees[T][_R(n)].begin;
+                            e = _trees[T][_R(n)].end;
+                            for (int i=b; i<e; ++i) {
                                 uint32_t id = jobs[node.fidx].calc_last_layer[i];
                                 float d = iinfo[id].residual;
                                 iinfo[id].in_which_node = _R(n);
@@ -819,6 +836,7 @@ class GBDT_t
         float  *_feature_weight;
         bool    _output_feature_weight;
         bool    _feature_begin_at_0;
+        int     _predict_tree_cut;
 
         bool _sample(float ratio) const {
             return ((random()%10000) / 10000.0) <= ratio;

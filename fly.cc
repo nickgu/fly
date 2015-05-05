@@ -20,6 +20,7 @@ void show_help() {
 "Usage: \n\
     fly [options] \n\
         -f --file      : input training file. \n\
+        -T --test      : test file. \n\
         -b --binary    : if this is set, input will use binary_reader. \n\
         -S --save      : save model to file. this config must combine with -f\n\
         -L --load      : load model from file \n\

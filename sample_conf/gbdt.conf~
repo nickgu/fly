@@ -1,0 +1,10 @@
+# load feature from data.
+[gbdt]
+shrinkage=0.1
+tree_num=100
+layer_num=5
+thread_num=25
+sample_instance=0.6
+sample_feature=0.6
+feature_begin_at_0=0
+#feature_load_dir=./gbdt_cache
