@@ -345,6 +345,10 @@ class GBDT_t
         }
 
         virtual float predict(const Instance_t& ins) const {
+            return predict_and_get_leaves(ins, NULL);
+        }
+
+        virtual float predict_and_get_leaves(const Instance_t& ins, vector<int>* output_leaf_id_in_each_tree) const {
             float ret = 0.0f;
 
             memset(_predict_buffer, 0, sizeof(float) * _dim_count);
@@ -355,6 +359,9 @@ class GBDT_t
             }
 
             SmallTreeNode_t** end_tree = _compact_trees + _tree_count;
+            if (output_leaf_id_in_each_tree!=NULL) {
+                output_leaf_id_in_each_tree->clear();
+            }
             int tc = 0;
             for (SmallTreeNode_t** tree=_compact_trees; tree<end_tree; ++tree) {
                 if (_predict_tree_cut>=0 && tc>=_predict_tree_cut) {
@@ -374,10 +381,14 @@ class GBDT_t
                         break;
                     }
                 }
+                if (output_leaf_id_in_each_tree!=NULL) {
+                    output_leaf_id_in_each_tree->push_back(nid);
+                }
                 ret += _mean[tree - _compact_trees][nid];
             }
             return ret;
         }
+
 
         virtual void write_model(FILE* stream) const {
             fwrite(&_tree_count, 1, sizeof(_tree_count), stream);
