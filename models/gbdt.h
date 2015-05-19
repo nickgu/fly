@@ -21,7 +21,7 @@ int _R(int x) {return x*2+2;}
 
 int sample_const = 0;
 int sample_threshold = 256;
-#define ITEM_SAMPLE(idx) (int(((idx + sample_const)*79) & 0xff) <= sample_threshold)
+#define ITEM_SAMPLE(idx) (int(((idx+137)*(sample_const+1)+79) & 0xff) <= sample_threshold)
 
 struct SortedIndex_t {
     /*
@@ -276,8 +276,12 @@ class GBDT_t
             _output_feature_weight = config.conf_int_default(section, "output_feature_weight", 0);
             LOG_NOTICE("output_feature_weight=%d", _output_feature_weight);
 
-            _feature_begin_at_0 = config.conf_int_default(section, "feature_begin_at_0", 1);
-            LOG_NOTICE("feature_begin_at_0=%d", _feature_begin_at_0);
+            string s = config.conf_str_default(section, "feature_mask", "");
+            vector<string> vs;
+            split((char*)s.c_str(), ",", vs);
+            for (size_t i=0; i<vs.size(); ++i) {
+                _feature_mask.insert(atoi(vs[i].c_str()));
+            }
 
             _tree_size = 1 << (_max_layer + 2);
 
@@ -625,10 +629,11 @@ class GBDT_t
                     for (int D=0; D<_dim_count; ++D) {
                         // sample features.
                         jobs[D].selected = false;
-                        // skip feature 0 on some case.
-                        if (!_feature_begin_at_0 && D==0) {
+                        
+                        it (_feature_mask.find(D)!=_feature_mask.end()) {
                             continue;
                         }
+
                         if (_sample(_sample_feature) 
                                 && selected_feature_count<_dim_count*_sample_feature) 
                         {
@@ -844,10 +849,11 @@ class GBDT_t
         float**         _mean;
 
         // debug feature weight.
-        float  *_feature_weight;
-        bool    _output_feature_weight;
-        bool    _feature_begin_at_0;
-        int     _predict_tree_cut;
+        float    *_feature_weight;
+        bool     _output_feature_weight;
+        bool     _feature_begin_at_0;
+        std::set<int> _feature_mask;
+        int      _predict_tree_cut;
 
         bool _sample(float ratio) const {
             return ((random()%10000) / 10000.0) <= ratio;

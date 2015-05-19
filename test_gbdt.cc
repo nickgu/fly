@@ -46,7 +46,7 @@ int main(int argc, char** argv) {
     const char* test_file_name = argv[2];
 
     FlyReader_t* test_data_reader  = NULL;
-    test_data_reader = new BinaryFeatureReader_t(test_file_name);
+    test_data_reader = new FeatureReader_t(test_file_name);
     Config_t nil_config;
     GBDT_t *model = new GBDT_t(nil_config, "");
 
