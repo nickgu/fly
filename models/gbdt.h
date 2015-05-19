@@ -630,7 +630,7 @@ class GBDT_t
                         // sample features.
                         jobs[D].selected = false;
                         
-                        it (_feature_mask.find(D)!=_feature_mask.end()) {
+                        if (_feature_mask.find(D)!=_feature_mask.end()) {
                             continue;
                         }
 
