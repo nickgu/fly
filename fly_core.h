@@ -37,7 +37,7 @@ struct Instance_t {
     FArray_t<IndValue_t> features;
 
     Instance_t():
-        features(128)
+        features(32)
     {}
 
     void write(FILE* stream) const {

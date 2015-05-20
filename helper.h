@@ -74,7 +74,7 @@ private:
 template <typename T>
 class FArray_t {
     public:
-        FArray_t(size_t extend_num=512):
+        FArray_t(size_t extend_num=16):
             _l(NULL),
             _num(0),
             _bnum(0),
