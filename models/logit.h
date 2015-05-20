@@ -17,6 +17,7 @@
 #include "../fly_measure.h"
 #include "../cfg.h"
 #include "iter.h"
+#include "uniform.h"
 
 class LogisticRegression_t 
     : public IterModel_t
@@ -39,11 +40,18 @@ class LogisticRegression_t
         /**
          *  1 / (1 + exp(-w*x))
          */
-        virtual float predict(const Instance_t& item) const {
+        virtual float predict(const Instance_t& raw_item) const {
+            Instance_t item;
+            _uniform.uniform(&item, raw_item);
+
+            //float ans = sigmoid( sparse_dot(_theta, item.features) );
+            //fprintf(stdout, "%f\t", ans);
+            //item.write(stdout);
             return sigmoid( sparse_dot(_theta, item.features) );
         }
 
         virtual void write_model(FILE* stream) const {
+            _uniform.write(stream);
             fprintf(stream, "%d\t%f\n", _theta_num, _theta.b);
             for (int i=0; i<_theta_num; ++i) {
                 fprintf(stream, "%d:%f\n", i, _theta.w[i]);
@@ -51,6 +59,7 @@ class LogisticRegression_t
         }
 
         virtual void read_model(FILE* stream) {
+            _uniform.read(stream);
             _theta.clear();
             fscanf(stream, "%d\t%f\n", &_theta_num, &_theta.b);
             _theta.set(_theta_num);
@@ -72,6 +81,8 @@ class LogisticRegression_t
             }
             _theta.b = random_05();
 
+            _uniform.stat(_reader);
+
             if (_use_momentum) {
                 _velo.set(_theta_num);
             }
@@ -80,6 +91,7 @@ class LogisticRegression_t
     private:
         Param_t _theta;
         int     _theta_num;
+        MeanStdvar_Uniform _uniform;
 
         // optima.
         Param_t _velo;
@@ -93,8 +105,11 @@ class LogisticRegression_t
          *  return: 
          *      Loss.
          */
-        virtual float _update(const Instance_t& item) {
-            float p = predict(item);
+        virtual float _update(const Instance_t& raw_item) {
+            float p = predict(raw_item);
+
+            Instance_t item;
+            _uniform.uniform(&item, raw_item);
             
             // @MAXL
             float desc = (item.label - p);

@@ -149,27 +149,19 @@ int main(int argc, char** argv) {
     }
 
 
-    bool preprocess = false;
     FlyModel_t *model = NULL;
     if (strcmp(model_name, "lr") == 0) {
         model = new LogisticRegression_t(model_config, config_section);
-        preprocess = true;
     } else if (strcmp(model_name, "cglr") == 0) {
         model = new CG_LogisticRegression_t(model_config, config_section);
-        preprocess = true;
     } else if (strcmp(model_name, "mnn") == 0) {
         model = new MultiNN_t(model_config, config_section);
-        preprocess = true;
-
     } else if (strcmp(model_name, "gbdt")==0) {
         model = new GBDT_t(model_config, config_section);
-
     } else if (strcmp(model_name, "meta")==0) {
         model = new MetaModel_t(model_config, config_section);
-
     } else if (strcmp(model_name, "knn") == 0) {
         model = new KNNModel_t(model_config, config_section);
-
     } else {
         LOG_NOTICE("bad models.");
         return -1;
@@ -189,11 +181,11 @@ int main(int argc, char** argv) {
     } else {
         if (input_file) {
             train_data_reader = new FeatureReader_t();
-            train_data_reader->set(input_file, preprocess);
+            train_data_reader->set(input_file);
         }
         if (test_file) {
             test_data_reader = new FeatureReader_t();
-            test_data_reader->set(test_file, preprocess);
+            test_data_reader->set(test_file);
         }
     }
 

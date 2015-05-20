@@ -35,8 +35,8 @@ class MultiClassFakeReader_t
         virtual int percentage() const {
             return _reader->percentage();
         }
-        virtual void set(const char* filename, bool preprocess=false) {
-            _reader->set(filename, preprocess);
+        virtual void set(const char* filename) {
+            _reader->set(filename);
         }
 
         /**
@@ -54,8 +54,8 @@ class MultiClassFakeReader_t
          *          // do what you need to do.
          *      }
          */ 
-        virtual bool read(Instance_t* item, bool original=false) {
-            bool ret = _reader->read(item, original);
+        virtual bool read(Instance_t* item) {
+            bool ret = _reader->read(item);
             //float old_label = item->label;
             if (fabs(item->label - _class_id) <= 0.5) {
                 item->label = 1.0;

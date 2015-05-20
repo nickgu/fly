@@ -96,7 +96,7 @@ class FlyReader_t {
         virtual size_t processed_num() const = 0;
         virtual size_t dim() const = 0;
         virtual int percentage() const = 0;
-        virtual void set(const char* filename, bool preprocess=false) = 0;
+        virtual void set(const char* filename) = 0;
 
         /**
          *  reset the stream.
@@ -111,7 +111,7 @@ class FlyReader_t {
          *          // do what you need to do.
          *      }
          */ 
-        virtual bool read(Instance_t* item, bool original=false) = 0;
+        virtual bool read(Instance_t* item) = 0;
 };
 
 class FlyModel_t {
@@ -177,9 +177,7 @@ class BinaryFeatureReader_t
         BinaryFeatureReader_t(const char* filename=NULL):
             _cur_id(0),
             _size(0),
-            _theta_num(0),
-            _weight(NULL),
-            _offset(NULL)
+            _theta_num(0)
         {
             if (filename != NULL) {
                 set(filename);
@@ -190,14 +188,6 @@ class BinaryFeatureReader_t
             if (_stream) {
                 fclose(_stream);
             }
-            if (_weight) {
-                delete [] _weight;
-                _weight = NULL;
-            }
-            if (_offset) {
-                delete [] _offset;
-                _offset = NULL;
-            }
         }
 
         virtual size_t size() const { return _size; }
@@ -207,7 +197,7 @@ class BinaryFeatureReader_t
             return int(_cur_id * 100.0f / _size);
         }
 
-        virtual void set(const char* filename, bool preprocess=false) {
+        virtual void set(const char* filename) {
             LOG_NOTICE("BinaryReader open [%s]", filename);
             _stream = fopen(filename, "rb");
             if (_stream == NULL) {
@@ -248,76 +238,6 @@ class BinaryFeatureReader_t
             }
             fprintf(stderr, "\n");
             LOG_NOTICE("processed: %llu records. theta_num=%d", _size, _theta_num);
-
-            /**
-             * standardlize
-             */
-            /*
-            _weight = new float[_theta_num];
-            _offset = new float[_theta_num];
-            memset(_offset, 0, sizeof(float)*_theta_num);
-            memset(_weight, 0, sizeof(float)*_theta_num);
-            reset();
-            size_t c = 0;
-            percentage = 0;
-            // calc means.
-            fseek(_stream, 0, SEEK_SET);
-            while ( !feof(_stream) ) {
-                Instance_t item;
-                item.read_binary(_stream);
-                for (size_t i=0; i<item.features.size(); ++i) {   
-                    int idx = item.features[i].index;
-                    _offset[idx] = _offset[idx] * (c / (c+1.0f)) + item.features[i].value * (1.0 / (c+1.0f));
-                }
-                c ++;
-
-                // progress.
-                int cur_per = int(c * 100.0 / _size);
-                if (cur_per > percentage) {
-                    percentage = cur_per;
-                    fprintf(stderr, "%ccalc mean info. complete %d%% (%llu/%llu records)", 
-                            13, percentage, c, _size);
-                    fflush(stderr);
-                }
-            }
-            fprintf(stderr, "\n");
-            LOG_NOTICE("calc mean over.");
-
-            reset();
-            percentage = 0;
-            c = 0;
-            memset(_weight, 0, sizeof(float)*_theta_num);
-            fseek(_stream, 0, SEEK_SET);
-            while ( !feof(_stream) ) {
-                Instance_t item;
-                item.read_binary(_stream);
-                for (size_t i=0; i<item.features.size(); ++i) {   
-                    int idx = item.features[i].index;
-                    _weight[idx] += ((item.features[i].value - _offset[idx]) * (item.features[i].value - _offset[idx]));
-                }
-                c ++;
-            
-                // progress.
-                int cur_per = int(c * 100.0 / _size);
-                if (cur_per > percentage) {
-                    percentage = cur_per;
-                    fprintf(stderr, "%ccalc stdvar info. complete %d%% (%llu/%llu records)", 
-                            13, percentage, c, _size);
-                    fflush(stderr);
-                }
-            }
-            fprintf(stderr, "\n");
-            LOG_NOTICE("calc stdvar over.");
-
-            for (int i=0; i<_theta_num; ++i) {
-                _weight[i] = sqrt(_weight[i] / c);
-                if ( fabs(_offset[i])<1e-7 || fabs(_weight[i])<1e-7) {
-                    _offset[i] = 1.0;
-                    _weight[i] = 1.0;
-                }
-                LOG_NOTICE("dim=%d mean=%f stdvar=%f", i, _offset[i], _weight[i]);
-            }
-            */
         }
 
         virtual void reset() {
@@ -325,17 +245,10 @@ class BinaryFeatureReader_t
             _cur_id = 0;
         }
 
-        virtual bool read(Instance_t* item, bool original=true) {
+        virtual bool read(Instance_t* item) {
             if ( !feof(_stream) ) {
                 item->read_binary(_stream);
                 _cur_id ++;
-                /*
-                if (! original) {
-                    for (size_t i=0; i<item->features.size(); ++i) {
-                        int idx = item->features[i].index;
-                        item->features[i].value = (item->features[i].value - _offset[idx]) / _weight[idx];
-                    }
-                }*/
                 return true;
             } else {
                 return false;
@@ -347,8 +260,6 @@ class BinaryFeatureReader_t
         size_t  _cur_id;
         size_t  _size;  // total record num.
         int     _theta_num;
-        float*  _weight;
-        float*  _offset;
 };
 
 /**
@@ -362,8 +273,6 @@ class FeatureReader_t
             _roll_size(roll_size),
             _cur_id(0),
             _theta_num(0),
-            _weight(NULL),
-            _offset(NULL),
             _buffer(8192)
         {
             if (filename != NULL) {
@@ -375,14 +284,6 @@ class FeatureReader_t
             if (_stream) {
                 fclose(_stream);
             }
-            if (_weight) {
-                delete [] _weight;
-                _weight = NULL;
-            }
-            if (_offset) {
-                delete [] _offset;
-                _offset = NULL;
-            }
         }
 
         virtual size_t size() const { return _buffer.size(); }
@@ -392,9 +293,9 @@ class FeatureReader_t
             return int(_cur_id * 100.0f / _buffer.size());
         }
 
-        virtual void set(const char* filename, bool preprocess=false) {
+        virtual void set(const char* filename) {
             LOG_NOTICE("TextFeatureReader open [%s]", filename);
-            _preprocess = preprocess;
+            //_preprocess = preprocess;
             _stream = fopen(filename, "r");
             if (_stream == NULL) {
                 throw std::runtime_error(string("Cannot open file : ") + string(filename));
@@ -432,49 +333,6 @@ class FeatureReader_t
                 }
             }
             fprintf(stderr, "\n");
-
-            if ( !_preprocess ) {
-                return ;
-            }
-
-            /**
-             * standardlize
-             */
-            _weight = new float[_theta_num];
-            _offset = new float[_theta_num];
-            memset(_offset, 0, sizeof(float)*_theta_num);
-            memset(_weight, 0, sizeof(float)*_theta_num);
-            reset();
-            size_t c = 0;
-            // calc means.
-            for (size_t u=0; u<_buffer.size(); ++u) {
-                Instance_t& item = _buffer[u];
-                for (size_t i=0; i<item.features.size(); ++i) {   
-                    int idx = item.features[i].index;
-                    _offset[idx] = _offset[idx] * (c / (c+1.0f)) + item.features[i].value * (1.0 / (c+1.0f));
-                }
-                c += 1;
-            }
-            reset();
-            c = 0;
-            memset(_weight, 0, sizeof(float)*_theta_num);
-            for (size_t u=0; u<_buffer.size(); ++u) {
-                Instance_t& item = _buffer[u];
-                for (size_t i=0; i<item.features.size(); ++i) {   
-                    int idx = item.features[i].index;
-                    _weight[idx] += ((item.features[i].value - _offset[idx]) * (item.features[i].value - _offset[idx]));
-                }
-                c += 1;
-            }
-            for (int i=0; i<_theta_num; ++i) {
-                _weight[i] = sqrt(_weight[i] / c);
-                if ( fabs(_offset[i])<1e-7 || fabs(_weight[i])<1e-7) {
-                    _offset[i] = 1.0;
-                    _weight[i] = 1.0;
-                }
-                LOG_NOTICE("dim=%d mean=%f stdvar=%f", i, _offset[i], _weight[i]);
-            }
-
             fclose(_stream);
             _stream = NULL;
         }
@@ -484,34 +342,24 @@ class FeatureReader_t
             _cur_id = 0;
         }
 
-        virtual bool read(Instance_t* item, bool original=false) {
+        virtual bool read(Instance_t* item) {
             if (_cur_id >= _buffer.size()) {
                 // read none.
                 return false;
             }
 
             *item = _buffer[_cur_id ++];
-            if (!original && _preprocess) {
-                for (size_t i=0; i<item->features.size(); ++i) {
-                    int idx = item->features[i].index;
-                    item->features[i].value = (item->features[i].value - _offset[idx]) / _weight[idx];
-                }
-            }
             return true;
         }
 
     private:
         static const size_t MaxLineLength = 40960;
 
-        bool _preprocess;
         FILE*   _stream;
         size_t  _roll_size;
         size_t  _cur_id;
 
         int     _theta_num;
-        float*  _weight;
-        float*  _offset;
-
         FArray_t<Instance_t> _buffer;
 };
 

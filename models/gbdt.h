@@ -209,8 +209,8 @@ void* __worker_layer_processor(void* input) {
                 nod.split_id = si.index;
             }
         }
-        nod.temp_sum += iinfo[ si.index ].residual;
         dim_id_sorted[ nod.grow++ ] = si.index;
+        nod.temp_sum += iinfo[ si.index ].residual;
     }
     for (int n=job.beg_node; n<job.end_node; ++n) {
         TreeNode_t& node = job.tree[n];
@@ -280,7 +280,9 @@ class GBDT_t
             vector<string> vs;
             split((char*)s.c_str(), ",", vs);
             for (size_t i=0; i<vs.size(); ++i) {
-                _feature_mask.insert(atoi(vs[i].c_str()));
+                int f = atoi(vs[i].c_str());
+                LOG_NOTICE("mask_feature: %d", f);
+                _feature_mask.insert(f);
             }
 
             _tree_size = 1 << (_max_layer + 2);
@@ -470,7 +472,7 @@ class GBDT_t
                 Instance_t item;
                 size_t item_id = 0;
                 int cur_per = 0;
-                while (reader->read(&item, true)) {
+                while (reader->read(&item/*, true*/)) {
                     _labels[item_id].residual = item.label;
                     item_id ++;
 
@@ -492,7 +494,7 @@ class GBDT_t
                 Instance_t item;
                 size_t item_id = 0;
                 int cur_per = 0;
-                while (reader->read(&item, true)) {
+                while (reader->read(&item/*, true*/)) {
                     _labels[item_id].residual = item.label;
                     // some feature may be missing.
                     for (int i=0; i<_dim_count; ++i) {
@@ -774,12 +776,12 @@ class GBDT_t
             // reading items. merge to node.
             _reader->reset();
             Instance_t item;
-            _reader->read(&item, true);
+            _reader->read(&item/*, true*/);
             uint32_t id = 0;
             for (size_t i=0; i<reverse_array.size(); ++i) {
                 const ItemID_ReverseInfo_t& info = reverse_array[i];
                 while (id<info.item_id) {
-                    if ( !_reader->read(&item, true) ) {
+                    if ( !_reader->read(&item/*, true*/) ) {
                         break;
                     }
                     id ++;
