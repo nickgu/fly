@@ -238,6 +238,7 @@ class BinaryFeatureReader_t
             }
             fprintf(stderr, "\n");
             LOG_NOTICE("processed: %llu records. theta_num=%d", _size, _theta_num);
+            reset();
         }
 
         virtual void reset() {

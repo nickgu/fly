@@ -388,7 +388,7 @@ class GBDT_t
                     }
                 }
                 if (output_leaf_id_in_each_tree!=NULL) {
-                    output_leaf_id_in_each_tree->push_back(nid);
+                    output_leaf_id_in_each_tree->push_back(nid - (1<<(_max_layer-1)));
                 }
                 ret += _mean[tree - _compact_trees][nid];
             }
@@ -414,6 +414,14 @@ class GBDT_t
             fread(&_tree_size, 1, sizeof(_tree_size), stream);
             fread(&_sr, 1, sizeof(_sr), stream);
             LOG_NOTICE("LOADING_INFO: _tree_count=%d _tree_size=%d _sr=%f", _tree_count, _tree_size, _sr);
+            _max_layer = 0;
+            size_t t =_tree_size;
+            while (t) {
+                t >>= 1;
+                _max_layer += 1;
+            }
+            _max_layer -= 2 + 1; //trick imp, for former trick imp..
+            LOG_NOTICE("LOADING_INFO: infer: tree_layer=%d", _max_layer);
 
             _dim_count = 0;
             _compact_trees = new SmallTreeNode_t*[_tree_count];
@@ -822,6 +830,8 @@ class GBDT_t
             delete [] jobs;
             delete [] iinfo;
         }
+
+        int layer_num() const { return _max_layer; }
 
     private:
         FlyReader_t* _reader;

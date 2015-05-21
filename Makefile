@@ -4,7 +4,7 @@ COMPILER = g++
 CPPFLAGS =  -D__VERSION_ID__="\"$(VERSION)\"" -g -Wall -O3 -fPIC  -pipe -D_REENTRANT -DLINUX -Wall
 DEBUG_CPPFLAGS =  -D__VERSION_ID__="\"$(VERSION)\"" -g -Wall -O0 -fPIC  -pipe -D_REENTRANT -DLINUX -Wall
 
-TARGET=fly auc fly_debug test_gbdt
+TARGET=fly auc fly_debug test_gbdt binary_feature_less
 INCLUDES=
 		  
 LIBS = -lcrypto \
@@ -28,6 +28,10 @@ test_gbdt: test_gbdt.cc
 	@echo 'MAKE: TEST_GBDT'
 	$(COMPILER) $^ -o $@ $(LIBS) $(CPPFLAGS) $(INCLUDES) 
 
+binary_feature_less: binary_feature_less.cc
+	@echo 'MAKE: BINARY_FEATURE_LESS'
+	$(COMPILER) $^ -o $@ $(LIBS) $(CPPFLAGS) $(INCLUDES) 
+
 auc: auc.cc
 	@echo 'MAKE: AUC'
 	$(COMPILER) $^ -o $@ $(LIBS) $(CPPFLAGS) $(INCLUDES) 
@@ -39,5 +43,7 @@ clean:
 test:
 	make c_prod.so
 	python test_prod.py < item.txt
+
+
 
 

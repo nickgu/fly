@@ -211,6 +211,10 @@ int main(int argc, char** argv) {
     if (model_load_file) {
         LOG_NOTICE("Model load from [%s]", model_load_file);
         FILE* model_file = fopen(model_load_file, "r");
+        if (!model_file) {
+            LOG_ERROR("Cannot open file [%s] to read model.", model_load_file);
+            return -1;
+        }
         model->read_model(model_file);
         fclose(model_file);
         LOG_NOTICE("Model load completed.");
