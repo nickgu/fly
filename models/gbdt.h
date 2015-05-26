@@ -351,10 +351,13 @@ class GBDT_t
         }
 
         virtual float predict(const Instance_t& ins) const {
-            return predict_and_get_leaves(ins, NULL);
+            return predict_and_get_leaves(ins, NULL, NULL);
         }
 
-        virtual float predict_and_get_leaves(const Instance_t& ins, vector<int>* output_leaf_id_in_each_tree) const {
+        virtual float predict_and_get_leaves(const Instance_t& ins, 
+                vector<int>* output_leaf_id_in_each_tree,
+                vector<float>* output_mean) const 
+        {
             float ret = 0.0f;
 
             memset(_predict_buffer, 0, sizeof(float) * _dim_count);
@@ -368,6 +371,10 @@ class GBDT_t
             if (output_leaf_id_in_each_tree!=NULL) {
                 output_leaf_id_in_each_tree->clear();
             }
+            if (output_mean) {
+                output_mean->clear();
+            }
+
             int tc = 0;
             for (SmallTreeNode_t** tree=_compact_trees; tree<end_tree; ++tree) {
                 if (_predict_tree_cut>=0 && tc>=_predict_tree_cut) {
@@ -389,6 +396,9 @@ class GBDT_t
                 }
                 if (output_leaf_id_in_each_tree!=NULL) {
                     output_leaf_id_in_each_tree->push_back(nid - (1<<(_max_layer-1)));
+                    if (output_mean) {
+                        output_mean->push_back(_mean[tree - _compact_trees][nid]);
+                    }
                 }
                 ret += _mean[tree - _compact_trees][nid];
             }
@@ -410,6 +420,10 @@ class GBDT_t
         }
 
         virtual void read_model(FILE* stream) {
+            if (stream == NULL) {
+                LOG_ERROR("Cannot load model from input stream.");
+                return;
+            }
             fread(&_tree_count, 1, sizeof(_tree_count), stream);
             fread(&_tree_size, 1, sizeof(_tree_size), stream);
             fread(&_sr, 1, sizeof(_sr), stream);

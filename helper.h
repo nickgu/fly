@@ -64,6 +64,10 @@ public:
         return _sum;
     }
 
+    void clear() {
+        _sum = 0;
+    }
+
 private:
     float   _sum;
 

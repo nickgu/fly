@@ -25,19 +25,17 @@ using namespace __gnu_cxx;
 
 typedef hash_map<int, float> ParamDict_t;
 
-#pragma pack(1)
 struct IndValue_t {
     int index;
     float value;
 };
-#pragma pack()
 
 struct Instance_t {
     float label;
     FArray_t<IndValue_t> features;
 
-    Instance_t():
-        features(32)
+    Instance_t(int feature_extend_size=32):
+        features(feature_extend_size)
     {}
 
     void write(FILE* stream) const {

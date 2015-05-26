@@ -47,6 +47,7 @@ class IterModel_t:
             _force_stop = false;
             _train_begin();
             for (int i=0; i<_iter_num; ++i) {
+                _iter_round = i + 1;
                 float loss = _epoch();
                 LOG_NOTICE("round %d: loss=%f", i+1, loss);
 
@@ -74,6 +75,7 @@ class IterModel_t:
         float   _min_loss;
         float   _final_loss_diff;
         bool    _force_stop;
+        size_t  _iter_round;
 
         const Config_t*  _config;
         FlyReader_t* _reader;

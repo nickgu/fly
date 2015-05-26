@@ -17,23 +17,33 @@
 
 #include "all_models.h"
 
-float test_auc(FlyReader_t* treader, GBDT_t* model, FILE* dump_feature_binary_file) {
+float test_auc(FlyReader_t* treader, GBDT_t* model, FILE* dump_feature_binary_file, bool output_mean) {
     treader->reset();
     Instance_t item;
     FArray_t<ResultPair_t> ans_list;
     int base_dim = treader->dim();
     int layer_num = model->layer_num();
     int last_layer_leave_num = (1 << layer_num);
+    int percent = 0;
+    int cnt = 0;
+
     while (treader->read(&item)) {
         std::vector<int> leaves;
+        std::vector<float> means;
         float ret;
+        float node_sum = 0;
         if (dump_feature_binary_file) {
-            ret = model->predict_and_get_leaves(item, &leaves);
+            ret = model->predict_and_get_leaves(item, &leaves, &means);
             // make it sparse.
             for (size_t i=0; i<leaves.size(); ++i) {
                 IndValue_t iv; 
                 iv.index = base_dim + i*last_layer_leave_num + leaves[i];
-                iv.value = 1.0;
+                node_sum += means[i];
+                if (output_mean) {
+                    iv.value = means[i];
+                } else {
+                    iv.value = 1.0;
+                }
                 item.features.push_back(iv);
             }
             item.write_binary(dump_feature_binary_file);
@@ -42,6 +52,13 @@ float test_auc(FlyReader_t* treader, GBDT_t* model, FILE* dump_feature_binary_fi
             ret = model->predict(item);
         }
         ans_list.push_back(ResultPair_t(item.label, ret));
+
+        cnt += 1;
+        int p = treader->percentage();
+        if (p>percent) {
+            percent = p;
+            fprintf(stderr, "%cProgress: %d%% (%d/%d)", 13, percent, cnt, treader->size()); 
+        }
     }
 
     float auc = calc_auc(ans_list.size(), ans_list.buffer());
@@ -50,12 +67,18 @@ float test_auc(FlyReader_t* treader, GBDT_t* model, FILE* dump_feature_binary_fi
 
 int main(int argc, char** argv) {
     if (argc <= 2) {
-        fprintf(stderr, "Usage: %s <model> <test_file> [<tree_interval> <tree_total>] -D[binary_output] -C[tree_cut]\n\n", argv[0]);
+        fprintf(stderr, "Usage: %s <model> <test_file> [<tree_interval> <tree_total>] -D[binary_output] -C[tree_cut] -m\n\n", argv[0]);
+        fprintf(stderr, "  -m : output mean, other wise output 0/1.\n");
         return -1;
     }
 
     int tree_cut = 0;
+    bool output_mean = false;
     for (int i=1; i<argc; ++i) {
+        if ( strcmp(argv[i], "-m")==0 ) {
+            output_mean = true;
+            LOG_NOTICE("Output node mean.");
+        }
         if ( strstr(argv[i], "-C")!=NULL ) {
             tree_cut = atoi(argv[i]+2);
             LOG_NOTICE("TreeCut: %d", tree_cut);
@@ -83,6 +106,7 @@ int main(int argc, char** argv) {
         }
     }
 
+
     const char* model_name = argv[1];
     const char* test_file_name = argv[2];
 
@@ -101,14 +125,14 @@ int main(int argc, char** argv) {
     if (test_interval>0) {
         for (int T=test_interval; T<=test_count; T+=test_interval) {
             model->set_predict_tree_cut(T);
-            auc = test_auc(treader, model, dump_feature_binary_file);
+            auc = test_auc(treader, model, dump_feature_binary_file, output_mean);
             LOG_NOTICE("INTERVAL_TEST\t%d\t%.4f", T, auc);
         }
     } else {
         if (tree_cut) {
             model->set_predict_tree_cut(tree_cut);
         }
-        auc = test_auc(treader, model, dump_feature_binary_file);
+        auc = test_auc(treader, model, dump_feature_binary_file, output_mean);
         LOG_NOTICE("auc: %.4f", auc);
     }
 

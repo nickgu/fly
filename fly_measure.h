@@ -39,7 +39,7 @@ float calc_rmse(size_t num, ResultPair_t* result) {
     float ret = 0;
     for (size_t i=0; i<num; ++i) {
         float x = (result[i].target - result[i].output);
-        ret += x * x;
+        ret += 0.5 * x * x;
     }
     ret /= num;
     ret = sqrt(ret);

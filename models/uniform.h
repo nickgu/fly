@@ -88,7 +88,7 @@ class MeanStdvar_Uniform {
                     }
                 }
             }
-            debug();
+            //debug();
         }
 
         void read(FILE* stream) {
@@ -123,7 +123,7 @@ class MeanStdvar_Uniform {
                 fscanf(stream, "%f:%f:%f:%f\n", &_mean[i], &_stdvar[i],
                         &_min[i], &_max[i]); 
             }
-            debug();
+            //debug();
         }
 
         void write(FILE* stream) const {
@@ -135,23 +135,27 @@ class MeanStdvar_Uniform {
         }
 
         void uniform(Instance_t* out, const Instance_t& in) const {
-            out->label = in.label;
-            out->features.clear();
-            for (size_t i=0; i<in.features.size(); ++i) {
-                IndValue_t iv = in.features[i];
+            *out = in;
+            for (size_t i=0; i<out->features.size(); ++i) {
+                IndValue_t& iv = out->features[i];
                 if (iv.index < (int)_dim_num) {
-                    iv.value = max(_min[iv.index], iv.value);
-                    iv.value = min(_max[iv.index], iv.value);
-                    if (_max[iv.index] - _min[iv.index] > 0) {
-                        iv.value = (iv.value - _min[iv.index]) / (_max[iv.index] - _min[iv.index]);
+                    // min-max.
+                    float mn = _min[iv.index];
+                    float mx = _max[iv.index];
+                    if (mx > mn) {
+                        float v = iv.value;
+                        if (v>mx) v=mx;
+                        else if (v<mn) v=mn; 
+                        iv.value = (v - mn) / (mx - mn);
                     }
+
+                    // avg-stddev.
                     /*
                     iv.value -= _mean[iv.index];
                     if (_stdvar[iv.index]>0) {
                         iv.value /= _stdvar[iv.index];
                     }*/
                 }
-                out->features.push_back(iv);
             }
         }
 
