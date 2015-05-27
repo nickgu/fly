@@ -17,7 +17,7 @@
 
 #include "all_models.h"
 
-float test_auc(FlyReader_t* treader, GBDT_t* model, FILE* dump_feature_binary_file, bool output_mean) {
+float test_auc(FlyReader_t* treader, GBDT_t* model, FILE* dump_feature_binary_file, bool output_mean, bool output_path) {
     treader->reset();
     Instance_t item;
     FArray_t<ResultPair_t> ans_list;
@@ -44,6 +44,16 @@ float test_auc(FlyReader_t* treader, GBDT_t* model, FILE* dump_feature_binary_fi
                 } else {
                     iv.value = 1.0;
                 }
+                if (!output_mean && output_path) {
+                    int l = leaves[i];
+                    while (l) {
+                        l = (l-1)/2;
+                        IndValue_t temp_iv; 
+                        temp_iv.index = base_dim + i*tree_node_count + l;
+                        temp_iv.value = 1.0;
+                        item.features.push_back(temp_iv);
+                    }
+                }
                 item.features.push_back(iv);
             }
             item.write_binary(dump_feature_binary_file);
@@ -67,17 +77,23 @@ float test_auc(FlyReader_t* treader, GBDT_t* model, FILE* dump_feature_binary_fi
 
 int main(int argc, char** argv) {
     if (argc <= 2) {
-        fprintf(stderr, "Usage: %s <model> <test_file> [<tree_interval> <tree_total>] -D[binary_output] -C[tree_cut] -m\n\n", argv[0]);
+        fprintf(stderr, "Usage: %s <model> <test_file> [<tree_interval> <tree_total>] -D[binary_output] -C[tree_cut] [-m] [-p]\n\n", argv[0]);
         fprintf(stderr, "  -m : output mean, other wise output 0/1.\n");
+        fprintf(stderr, "  -p : if -Doutput_file is set, output the path-info.\n");
         return -1;
     }
 
     int tree_cut = 0;
     bool output_mean = false;
+    bool output_path = false;
     for (int i=1; i<argc; ++i) {
         if ( strcmp(argv[i], "-m")==0 ) {
             output_mean = true;
             LOG_NOTICE("Output node mean.");
+        }
+        if ( strcmp(argv[i], "-p")==0 ) {
+            output_path = true;
+            LOG_NOTICE("Output path-in-tree feature.");
         }
         if ( strstr(argv[i], "-C")!=NULL ) {
             tree_cut = atoi(argv[i]+2);
@@ -125,14 +141,14 @@ int main(int argc, char** argv) {
     if (test_interval>0) {
         for (int T=test_interval; T<=test_count; T+=test_interval) {
             model->set_predict_tree_cut(T);
-            auc = test_auc(treader, model, dump_feature_binary_file, output_mean);
+            auc = test_auc(treader, model, dump_feature_binary_file, output_mean, output_path);
             LOG_NOTICE("INTERVAL_TEST\t%d\t%.4f", T, auc);
         }
     } else {
         if (tree_cut) {
             model->set_predict_tree_cut(tree_cut);
         }
-        auc = test_auc(treader, model, dump_feature_binary_file, output_mean);
+        auc = test_auc(treader, model, dump_feature_binary_file, output_mean, output_path);
         LOG_NOTICE("auc: %.4f", auc);
     }
 
