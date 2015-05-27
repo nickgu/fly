@@ -26,6 +26,7 @@ float test_auc(FlyReader_t* treader, GBDT_t* model, FILE* dump_feature_binary_fi
     int percent = 0;
     int cnt = 0;
 
+    LOG_NOTICE("Transform: base_dim=%d tree_node_count=%d", base_dim, tree_node_count);
     while (treader->read(&item)) {
         std::vector<int> leaves;
         std::vector<float> means;

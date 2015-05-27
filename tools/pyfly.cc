@@ -43,11 +43,9 @@ static PyObject* tree_features(PyObject *self, PyObject *args)
     PyObject* ans_list = PyList_New(leaves.size());
     int tree_node_count = p_model->tree_node_count();;
     for (size_t i=0; i<leaves.size(); ++i) {
-        fprintf(stderr, "%d,", leaves[i]);
         int s = i*tree_node_count + leaves[i];
         PyList_SET_ITEM(ans_list, i, PyInt_FromLong(s));
     }
-    fprintf(stderr, "\n");
     return ans_list;
 }
 

@@ -24,6 +24,7 @@ src/fly:
 	cd ../
 
 clean:
+	rm -rf *~ 
 	rm -rf output
 	cd src && make clean;
 	cd ../;
