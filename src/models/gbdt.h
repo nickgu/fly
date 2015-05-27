@@ -395,7 +395,7 @@ class GBDT_t
                     }
                 }
                 if (output_leaf_id_in_each_tree!=NULL) {
-                    output_leaf_id_in_each_tree->push_back(nid - (1<<(_max_layer-1)));
+                    output_leaf_id_in_each_tree->push_back(nid);
                     if (output_mean) {
                         output_mean->push_back(_mean[tree - _compact_trees][nid]);
                     }
@@ -846,6 +846,7 @@ class GBDT_t
         }
 
         int layer_num() const { return _max_layer; }
+        size_t tree_node_count() const { return (1<< (_max_layer + 1)); }
 
     private:
         FlyReader_t* _reader;

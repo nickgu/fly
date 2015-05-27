@@ -22,8 +22,7 @@ float test_auc(FlyReader_t* treader, GBDT_t* model, FILE* dump_feature_binary_fi
     Instance_t item;
     FArray_t<ResultPair_t> ans_list;
     int base_dim = treader->dim();
-    int layer_num = model->layer_num();
-    int last_layer_leave_num = (1 << layer_num);
+    int tree_node_count = model->tree_node_count();
     int percent = 0;
     int cnt = 0;
 
@@ -37,7 +36,7 @@ float test_auc(FlyReader_t* treader, GBDT_t* model, FILE* dump_feature_binary_fi
             // make it sparse.
             for (size_t i=0; i<leaves.size(); ++i) {
                 IndValue_t iv; 
-                iv.index = base_dim + i*last_layer_leave_num + leaves[i];
+                iv.index = base_dim + i*tree_node_count + leaves[i];
                 node_sum += means[i];
                 if (output_mean) {
                     iv.value = means[i];
