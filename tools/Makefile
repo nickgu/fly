@@ -5,17 +5,17 @@ COMPILER = g++
 CPPFLAGS =  -D__VERSION_ID__="\"$(VERSION)\"" -g -Wall -O3 -fPIC  -pipe -D_REENTRANT -DLINUX -Wall
 DEBUG_CPPFLAGS =  -D__VERSION_ID__="\"$(VERSION)\"" -g -Wall -O0 -fPIC  -pipe -D_REENTRANT -DLINUX -Wall
 
-TARGET=fly auc fly_debug test_gbdt binary_feature_less
-INCLUDES=
+TARGET=auc test_gbdt binary_feature_less
+INCLUDES= -I../src/include\
+		  -I../src/models
 		  
 LIBS = -lcrypto \
 	   -lpthread
 
 all: clean $(TARGET)
-	@echo 'MAKE: ALL'
-	mkdir output
-	mv $(TARGET) output
-	cp -r sample_conf output
+	@echo 'MAKE: TOOLS'
+	mkdir tools
+	mv $(TARGET) tools
 
 fly: fly.cc
 	@echo 'MAKE: FLY'
@@ -38,12 +38,8 @@ auc: auc.cc
 	$(COMPILER) $^ -o $@ $(LIBS) $(CPPFLAGS) $(INCLUDES) 
 
 clean:
-	rm -rf *.o *.so *~ $(TARGET) models/*~
-	rm -rf output
-
-test:
-	make c_prod.so
-	python test_prod.py < item.txt
+	rm -rf *.o *.so *~ $(TARGET)
+	rm -rf tools
 
 
 
