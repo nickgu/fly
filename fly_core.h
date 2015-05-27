@@ -188,25 +188,48 @@ class BinaryFeatureReader_t
             }
         }
 
-        virtual size_t size() const { return _size; }
+        virtual size_t size() const { 
+            if (!_is_stat) {
+                throw std::runtime_error("Access size or dim before stat.");
+            }
+            return _size; 
+        }
         virtual size_t processed_num() const { return _cur_id; }
-        virtual size_t dim() const {return _theta_num;}
+        virtual size_t dim() const {
+            if (!_is_stat) {
+                throw std::runtime_error("Access size or dim before stat.");
+            }
+            return _theta_num;
+        }
         virtual int percentage() const {
             return int(_cur_id * 100.0f / _size);
         }
 
         virtual void set(const char* filename) {
+            _is_stat = false;
             LOG_NOTICE("BinaryReader open [%s]", filename);
             _stream = fopen(filename, "rb");
             if (_stream == NULL) {
                 throw std::runtime_error(string("Cannot open file : ") + string(filename));
             }
 
+            if (strcmp(filename, "/dev/stdin") != 0) {
+                stat();
+            } else {
+                LOG_NOTICE("Input is /dev/stdin. Streming ignore stat.");
+            }
+        }
+
+        void stat() {
+            if (_is_stat) {
+                return ;
+            }
+            _is_stat = true;
+            LOG_NOTICE("DO_STAT ON BINARY FILE.");
             fseek(_stream, 0, SEEK_END);
             size_t total_file_size = ftell(_stream);
             int percentage = 0;
 
-            // load all data into memory.
             _cur_id = 0;
             _size = 0;
             _theta_num = 0;
@@ -259,6 +282,7 @@ class BinaryFeatureReader_t
         size_t  _cur_id;
         size_t  _size;  // total record num.
         int     _theta_num;
+        bool    _is_stat;
 };
 
 /**

@@ -173,6 +173,7 @@ int main(int argc, char** argv) {
     if ( binary_mode ) {
         if (input_file) {
             train_data_reader = new BinaryFeatureReader_t(input_file);  
+            ((BinaryFeatureReader_t*)train_data_reader)->stat();
         }
         if (test_file) {
             test_data_reader = new BinaryFeatureReader_t(test_file);
@@ -225,10 +226,10 @@ int main(int argc, char** argv) {
     if (test_data_reader != NULL) {
         LOG_NOTICE("Training over. Begin to test!");
         treader = test_data_reader;
-        treader->reset();
+        //treader->reset();
         int c = 0;
         Instance_t item;
-        ResultPair_t* res_list = new ResultPair_t [treader->size()];
+        FArray_t<ResultPair_t> res_list(5000000);
         FILE* out_fd = NULL;
         if (output_file) {
             out_fd = fopen(output_file, "w");
@@ -237,10 +238,13 @@ int main(int argc, char** argv) {
         tm.begin();
         while (treader->read(&item)) {
             //item.write(stderr);
-            res_list[c].target = item.label;
-            res_list[c].output = model->predict(item);
+            ResultPair_t ans;
+            ans.target = item.label;
+            ans.output = model->predict(item);
+            res_list.push_back(ans);
+
             if (out_fd) {
-                fprintf(out_fd, "%f\t%f\n", res_list[c].target, res_list[c].output);
+                fprintf(out_fd, "%f\t%f\n", ans.target, ans.output);
             }
             c++;
         }
@@ -249,16 +253,17 @@ int main(int argc, char** argv) {
         if (out_fd) {
             fclose(out_fd);
         }
-        LOG_NOTICE("auc: %.6f", calc_auc(c, res_list));
-        LOG_NOTICE("logMLE: %.6f", calc_log_mle(c, res_list));
-        float rmse = calc_rmse(c, res_list);
-        LOG_NOTICE("rmse: %f, mse=%f", rmse, rmse*rmse);
-        LOG_NOTICE("confussion: %s", calc_confussion_matrix(c, res_list).str().c_str());
 
-        int error = calc_error(c, res_list);
+        ResultPair_t* res_buffer = res_list.buffer();
+        LOG_NOTICE("auc: %.6f", calc_auc(c, res_buffer));
+        LOG_NOTICE("logMLE: %.6f", calc_log_mle(c, res_buffer));
+        float rmse = calc_rmse(c, res_buffer);
+        LOG_NOTICE("rmse: %f, mse=%f", rmse, rmse*rmse);
+        LOG_NOTICE("confussion: %s", calc_confussion_matrix(c, res_buffer).str().c_str());
+
+        int error = calc_error(c, res_buffer);
         LOG_NOTICE("error: %d/%d (%.2f%%)", error, c, error*100.0/c);
 
-        delete [] res_list;
         delete test_data_reader;
         test_data_reader = NULL;
     }
