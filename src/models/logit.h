@@ -206,13 +206,14 @@ class LogisticRegression_t
             _predict_tm.clear();
             _calc_tm.clear();
 
-            if (_epoch_loss < _best_loss - _learn_rate * 0.01) {
+            if (_epoch_loss < _best_loss - _learn_rate * _epoch_loss) {
                 float loss_improvement = _best_loss - _epoch_loss;
                 _best_loss = _epoch_loss;
                 _best_theta = _theta;
                 _best_round = _iter_round;
-                LOG_NOTICE("Round %d: accept param. loss=%.8f, rate=%f (d=%.8f)", 
-                        _iter_round, _epoch_loss, _learn_rate, loss_improvement);
+                LOG_NOTICE("Round %d: accept param. loss=%.8f, rate=%f (d=%.8f m=%.8f)", 
+                        _iter_round, _epoch_loss, _learn_rate, loss_improvement,
+                        _learn_rate * _epoch_loss);
 
                 /*
                 if (_original_rate != _learn_rate) {

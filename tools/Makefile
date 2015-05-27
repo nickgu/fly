@@ -43,6 +43,10 @@ auc: auc.cc
 GBDT.so: pyfly.cc
 	$(COMPILER) -fpic $^ -shared -o $@ $(INCLUDES) $(PYTHON27_INCLUDE) $(LIBS) $(CPPFLAGS) 
 
+test_multi_stat: test_multi_stat.cc
+	@echo 'MAKE: TEST_MULTI_STAT'
+	$(COMPILER) $^ -o $@ $(LIBS) $(CPPFLAGS) $(INCLUDES) 
+
 clean:
 	rm -rf *.o *.so *~ $(TARGET)
 	rm -rf tools
