@@ -11,8 +11,8 @@
 
 
 //#include "models/linear.h"
-#include "models/logit.h"
-#include "models/logit_cg.h"
+#include "logit.h"
+#include "logit_cg.h"
 
 #include "models/mnn.h"
 #include "models/gbdt.h"

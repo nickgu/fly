@@ -12,10 +12,10 @@
 #include <cstdlib>
 #include <cmath>
 
-#include "../fly_core.h"
-#include "../fly_math.h"
-#include "../fly_measure.h"
-#include "../cfg.h"
+#include "fly_core.h"
+#include "fly_math.h"
+#include "fly_measure.h"
+#include "cfg.h"
 #include "iter.h"
 
 class CG_LogisticRegression_t 

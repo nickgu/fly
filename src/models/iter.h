@@ -9,9 +9,9 @@
 #ifndef  __ITER_H_
 #define  __ITER_H_
 
-#include "../cfg.h"
-#include "../fly_core.h"
-#include "../fly_measure.h"
+#include "cfg.h"
+#include "fly_core.h"
+#include "fly_measure.h"
 
 class IterModel_t: 
     public FlyModel_t

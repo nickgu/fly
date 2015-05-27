@@ -9,8 +9,8 @@
 #ifndef  __GBDT_H_
 #define  __GBDT_H_
 
-#include "../fly_core.h"
-#include "../cfg.h"
+#include "fly_core.h"
+#include "cfg.h"
 
 #include <set>
 

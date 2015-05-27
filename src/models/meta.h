@@ -9,10 +9,10 @@
 #ifndef  __META_H_
 #define  __META_H_
 
-#include "../fly_core.h"
-#include "../fly_math.h"
-#include "../fly_measure.h"
-#include "../cfg.h"
+#include "fly_core.h"
+#include "fly_math.h"
+#include "fly_measure.h"
+#include "cfg.h"
 
 class MultiClassFakeReader_t 
     : public FlyReader_t 

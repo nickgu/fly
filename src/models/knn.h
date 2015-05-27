@@ -12,10 +12,10 @@
 #include <queue>
 using namespace std;
 
-#include "../fly_core.h"
-#include "../fly_math.h"
-#include "../fly_measure.h"
-#include "../cfg.h"
+#include "fly_core.h"
+#include "fly_math.h"
+#include "fly_measure.h"
+#include "cfg.h"
 
 /*
  * multi-class classifier.

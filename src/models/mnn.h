@@ -9,7 +9,7 @@
 #ifndef  __MNN_H_
 #define  __MNN_H_
 
-#include "../fly_math.h"
+#include "fly_math.h"
 #include "iter.h"
 
 class MultiNN_t :
