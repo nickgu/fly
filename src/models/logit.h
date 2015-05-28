@@ -33,7 +33,7 @@ class LogisticRegression_t
         LogisticRegression_t(const Config_t& conf, const char* section):
             IterModel_t(conf, section),
             _theta_num(0),
-            _best_loss(1e9)
+            _best_loss(1.0)
         {
             _momentum_ratio = 0.0f;
             _use_momentum = false;
