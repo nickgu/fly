@@ -77,6 +77,7 @@ class MeanStdvar_Uniform {
 
             reader->reset();
             n = 0;
+            int perc = 0;
             while (reader->read(&item)) {
                 n ++;
                 for (size_t i=0; i<item.features.size(); ++i) {
@@ -87,7 +88,14 @@ class MeanStdvar_Uniform {
                         _stdvar[fid] = _stdvar[fid] * ((n-1.0)/n) + value / n; 
                     }
                 }
+
+                int cur = reader->percentage();
+                if (cur > perc) {
+                    perc = cur;
+                    fprintf(stderr, "%cProcessed: %d%%", 13, cur);
+                }
             }
+            fprintf(stderr, "\n");
             //debug();
         }
 
@@ -158,6 +166,24 @@ class MeanStdvar_Uniform {
                 }
             }
         }
+
+        void self_uniform(Instance_t* in_out) const {
+            for (size_t i=0; i<in_out->features.size(); ++i) {
+                IndValue_t& iv = in_out->features[i];
+                if (iv.index < (int)_dim_num) {
+                    // min-max.
+                    float mn = _min[iv.index];
+                    float mx = _max[iv.index];
+                    if (mx > mn) {
+                        float v = iv.value;
+                        if (v>mx) v=mx;
+                        else if (v<mn) v=mn; 
+                        iv.value = (v - mn) / (mx - mn);
+                    }
+                }
+            }
+        }
+
 
         void debug() {
             // debug code.

@@ -138,7 +138,7 @@ class LinearRegression_t
          *  return: 
          *      Loss.
          */
-        float _update(const Instance_t& item) {
+        float _update(Instance_t& item) {
             float p = predict(item);
             
             // L2 regularization.

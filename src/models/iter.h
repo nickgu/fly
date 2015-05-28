@@ -30,8 +30,6 @@ class IterModel_t:
             _min_loss = config.conf_float_default(section, "min_loss", 0.005);
             LOG_NOTICE("_min_loss=%f", _min_loss);
 
-            _final_loss_diff = config.conf_float_default(section, "final_loss_diff", 0.01);
-            LOG_NOTICE("_final_loss_diff=%f", _final_loss_diff);
         }
 
         virtual ~IterModel_t() 
@@ -59,11 +57,6 @@ class IterModel_t:
                     LOG_NOTICE("min loss reached, break!");
                     break;
                 }
-                float diff_loss = last_loss - loss;
-                if ( diff_loss > -1e-6 && diff_loss < _final_loss_diff ) {
-                    LOG_NOTICE("loss delta is too small, break!");
-                    break;
-                } 
                 last_loss = loss;
             }
             _train_end();
@@ -73,7 +66,6 @@ class IterModel_t:
         int     _iter_num;
         float   _learn_rate;
         float   _min_loss;
-        float   _final_loss_diff;
         bool    _force_stop;
         size_t  _iter_round;
 
@@ -84,7 +76,7 @@ class IterModel_t:
          * Interface.
          *  return loss.
          */
-        virtual float _update(const Instance_t& item) = 0;
+        virtual float _update(Instance_t& item) = 0;
 
         virtual void _train_begin() {};
         virtual void _train_end() {};
@@ -94,7 +86,7 @@ class IterModel_t:
 
         float _epoch() {
             int last_per = 0;
-            float loss = 0;
+            double loss = 0;
             _reader->reset();
             _epoch_begin();
             Instance_t item;
@@ -111,6 +103,7 @@ class IterModel_t:
                 }
             }
             fprintf(stderr, "\n");
+            LOG_NOTICE("TOTAL_LOSS=%f", loss);
             loss = loss / _reader->size();
             _epoch_loss = loss;
             _epoch_end();

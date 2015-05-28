@@ -82,12 +82,18 @@ class FArray_t {
             _l(NULL),
             _num(0),
             _bnum(0),
-            _extend_num(extend_num),
-            _magic_check(0xDEADBEEF)
+            _extend_num(extend_num)
         {}
 
         FArray_t(const FArray_t& o) {
-            *this = o;
+            _bnum = o._bnum;
+            _num = o._num;
+            _extend_num = o._extend_num;
+            if (_bnum > 0) {
+                _l = (T*)malloc(_bnum * sizeof(T));
+                //LOG_NOTICE("m: %p [%u]", _l, _bnum);
+                memcpy(_l, o._l, _num * sizeof(T));
+            }
         }
 
         FArray_t& operator = (const FArray_t& o) {
@@ -133,7 +139,10 @@ class FArray_t {
         void read(FILE* stream) {
             fread(&_num, 1, sizeof(_num), stream);
             if (_num > _bnum) {
-                _l = (T*)realloc(_l, _num * sizeof(T) );
+                if (_bnum > 0) {
+                    free(_l);
+                }
+                _l = (T*)malloc(_num * sizeof(T));
                 if (_l == NULL) {
                     throw std::runtime_error("extend buffer for FArray failed!");
                 }
@@ -152,7 +161,6 @@ class FArray_t {
         size_t _num;
         size_t _bnum;
         size_t _extend_num;
-        unsigned _magic_check;
 
         void _extend() {
             _l = (T*)realloc(_l, (_bnum + _extend_num) * sizeof(T) );
@@ -164,12 +172,8 @@ class FArray_t {
         }
 
         void _release() {
-            if (_magic_check == 0xDEADBEEF) {
-                // do nothing because in glib, a new on wild memory will happen.
-                // which leads to a exception free.
-                if (_l) {
-                    free(_l);
-                }
+            if (_l) {
+                free(_l);
             }
             _l = NULL;
             _num = _bnum = 0;
@@ -186,6 +190,125 @@ void split(char* s, const char* token, std::vector<std::string>& out) {
     }
     return ;
 }
+
+/*
+ * Producer and Customer Poot
+ * Condition: 
+ *      _p_id + 1 != _c_id
+ *      _c_id + 2 != _p_id (..)
+ * one empty cell to make validation.
+ */
+template <typename T>
+class PCPool_t {
+    public:
+        PCPool_t(size_t buffer_size) {
+            _buffer_size = buffer_size;
+            _buffer = new T[_buffer_size];
+            _c_id = 0;
+            _p_id = 0;
+            _total_get = 0;
+            _total_put = 0;
+            _flag_putting = true;
+            pthread_spin_init(&_spinlock, 0);
+            pthread_spin_init(&_spinlock_p, 0);
+        }
+        ~PCPool_t() {
+            if (_buffer) {
+                delete [] _buffer;
+                _buffer_size = 0;
+            }
+        }
+
+        // Producer put item.
+        void put(const T& item) {
+            // try util ok.
+            while (1) {
+                size_t next_id = (_p_id + 1) % _buffer_size;
+                if (next_id == _c_id) {
+                    // full: need to wait for putting.
+                    continue;
+                }
+                _buffer[_p_id] = item;
+                _p_id = next_id;
+                _total_put += 1;
+                return ;
+            }
+        }
+
+        // Return ptr for writing object.
+        T* begin_put() {
+            // try util ok.
+            while (1) {
+                size_t next_id = (_p_id + 1) % _buffer_size;
+                if (next_id == _c_id) {
+                    // full: need to wait for putting.
+                    continue;
+                }
+                return _buffer + _p_id;
+            }
+        }
+
+        void end_put(bool put_ok=true) {
+            if (put_ok) {
+                _p_id = (_p_id + 1) % _buffer_size;;
+                _total_put += 1;
+            }
+        }
+
+        // Customer try to get.
+        // loop util get.
+        // return false if nothing to process forever.
+        bool get(T* out_item) {
+            // retry until work or full.
+            while (1) {
+                pthread_spin_lock(&_spinlock);
+                if (_c_id == _p_id) { // empty or stop.
+                    pthread_spin_unlock(&_spinlock);
+                    // need to wait for processing.
+                    if (!_flag_putting) {
+                        LOG_NOTICE("return false");
+                        return false;
+                    }
+                    continue;
+                }
+                if (_c_id + 1 == _p_id && _flag_putting) {
+                    pthread_spin_unlock(&_spinlock);
+                    // need to wait for processing.
+                    continue;
+                }
+                size_t m = _c_id;
+                //LOG_NOTICE("%d %d", _c_id, _p_id);
+                _c_id = (_c_id + 1) % _buffer_size;
+                _total_get += 1;
+                *out_item = _buffer[m];
+                // unlock.
+                //LOG_NOTICE("return true: c_id=%d(%d):%p p_id=%d", m, _c_id, *out_item, _p_id);
+                pthread_spin_unlock(&_spinlock);
+                return true;
+            }
+        }
+
+        size_t num_get() const { return _total_get; }
+        size_t num_put() const { return _total_put; }
+
+        void set_putting(bool putting) {
+            _flag_putting = putting;
+        }
+
+    private:
+        T*      _buffer;
+        size_t  _buffer_size;
+        size_t  _c_id;
+        size_t  _p_id;
+        bool    _flag_putting;
+
+        size_t  _total_get;
+        size_t  _total_put;
+
+        pthread_spinlock_t _spinlock;
+        pthread_spinlock_t _spinlock_p;
+};
+
 
 template<typename Job_t> 
 void multi_thread_jobs(void* (func_t)(void*), Job_t* job_context, size_t job_num, size_t thread_num)

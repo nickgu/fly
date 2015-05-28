@@ -19,101 +19,37 @@
 
 #include <pthread.h>
 
-/*
- * Producer and Customer Poot
- * Condition: _p_id + 1 != _c_id
- * one empty cell to make validation.
- */
-template <typename T>
-class PCPool_t {
-    public:
-        PCPool_t(size_t buffer_size) {
-            _buffer_size = buffer_size;
-            _buffer = new T[_buffer_size];
-            _c_id = 0;
-            _p_id = 0;
-            _flag_putting = true;
-            pthread_spin_init(&_spinlock, 0);
-        }
-        ~PCPool_t() {
-            if (_buffer) {
-                delete [] _buffer;
-                _buffer_size = 0;
-            }
-        }
-
-        // Producer put item.
-        void put(const T& item) {
-            // try util ok.
-            while (1) {
-                size_t next_id = (_p_id + 1) % _buffer_size;
-                if (next_id == _c_id) {
-                    // full: need to wait for putting.
-                    continue;
-                }
-                _buffer[_p_id] = item;
-                _p_id = next_id;
-                // unlock.
-                return ;
-            }
-        }
-
-        // Customer try to get.
-        // loop util get.
-        // return false if nothing to process forever.
-        bool get(T* out_item) {
-            // retry until work or full.
-            while (1) {
-                pthread_spin_lock(&_spinlock);
-                if (_c_id == _p_id) { // empty or stop.
-                    pthread_spin_unlock(&_spinlock);
-                    // need to wait for processing.
-                    if (!_flag_putting) {
-                        return false;
-                    }
-                    continue;
-                }
-                size_t m = _c_id;
-                _c_id = (_c_id + 1) % _buffer_size;
-                *out_item = _buffer[m];
-                // unlock.
-                pthread_spin_unlock(&_spinlock);
-                return true;
-            }
-        }
-
-        void set_putting(bool putting) {
-            _flag_putting = putting;
-        }
-
-    private:
-        T*      _buffer;
-        size_t  _buffer_size;
-        size_t  _c_id;
-        size_t  _p_id;
-        bool    _flag_putting;
-
-        pthread_spinlock_t _spinlock;
-};
-
 struct Context_t {
     int id;
     PCPool_t<Instance_t>* pool;
     const char* filename;
+    
+    int dim_count;
+    int counter;
 };
 
 void* stat(void* context) {
     Context_t* con = (Context_t*)context;
-    int counter = 0;
+    con->counter = 0;
+    con->dim_count = 0;
     if (con->filename) {
         LOG_NOTICE("Thread[%d] is reader.", con->id);
         BinaryFeatureReader_t reader(con->filename);
-        Instance_t item;
-        while (reader.read(&item)) {
-            con->pool->put(item);
-            counter ++;
-            if (counter % 10000 ==0) {
-                LOG_NOTICE("writer.%d c=%d", con->id, counter);
+        while (1) {
+            Instance_t *item = con->pool->begin_put();
+            if (!reader.read(item)) {
+                con->pool->end_put(false);
+                break;
+            }
+
+            con->pool->end_put();
+            con->counter ++;
+            if (con->counter % 1000000 ==0) {
+                LOG_NOTICE("writer.%d c=%d pool_status=%d,%d", 
+                        con->id, 
+                        con->counter,
+                        con->pool->num_put(),
+                        con->pool->num_get());
             }
         }   
         con->pool->set_putting(false);
@@ -121,25 +57,47 @@ void* stat(void* context) {
         LOG_NOTICE("Thread[%d] is processor.", con->id);
         Instance_t item;
         while (con->pool->get(&item)) {
-            counter ++;
+            con->counter ++;
+            for (size_t i=0; i<item.features.size(); ++i) {
+                if ( item.features[i].index >= con->dim_count) {
+                    con->dim_count = item.features[i].index + 1;
+                }
+            }
         }
-        LOG_NOTICE("Thread[%d] counter=%d", con->id, counter);
+        LOG_NOTICE("Thread[%d] counter=%d", con->id, con->counter);
     }
+
     return NULL;
 }
 
 
 int main(int argc, const char** argv) {
-    PCPool_t<Instance_t> pool(1000000);
-    int thread_num = 10;
+    PCPool_t<Instance_t> pool(10000000);
+    int thread_num = atoi(argv[2]);
     Context_t* jobs = new Context_t[thread_num];
+    LOG_NOTICE("Threadnum=%d", thread_num);
     for (int i=0; i<thread_num; ++i) {
         jobs[i].id = i;
         jobs[i].pool = &pool;
         jobs[i].filename = NULL;
+        jobs[i].counter = 0;
+        jobs[i].dim_count = 0;
     }
     jobs[0].filename = argv[1];
+
+    Timer tm;
+    tm.begin();
     multi_thread_jobs(stat, jobs, thread_num, thread_num);
+
+    int total_item = 0;
+    int feature_count = 0;
+    for (int i=1; i<thread_num; ++i) {
+        total_item += jobs[i].counter;
+        feature_count = max(feature_count, jobs[i].dim_count);
+    }
+    LOG_NOTICE("Final stat: total_item=%d feature_count=%d", total_item, feature_count);
+    tm.end();
+    LOG_NOTICE("TIME = %.4f", tm.cost_time());
 }
 
 /* vim: set expandtab ts=4 sw=4 sts=4 tw=100: */

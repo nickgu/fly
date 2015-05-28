@@ -243,7 +243,7 @@ class MultiNN_t :
             return _theta[layer][in_idx * _out_num[layer] + out_idx];
         }
 
-        virtual float _update(const Instance_t& item) {
+        virtual float _update(Instance_t& item) {
             // forward predict, record output data.
             float new_p = predict(item);
 

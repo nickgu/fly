@@ -22,6 +22,13 @@
 class LogisticRegression_t 
     : public IterModel_t
 {
+    enum LearnRateAdjustMethod_t {
+        FeatureDecay = 0,
+        Decay,
+        Constant,
+        Shrink
+    };
+
     public:
         LogisticRegression_t(const Config_t& conf, const char* section):
             IterModel_t(conf, section),
@@ -35,8 +42,31 @@ class LogisticRegression_t
                 LOG_NOTICE("use_momentum:true. momentum_ratio:%f", _momentum_ratio);
             }
 
+            string method;
+            method = conf.conf_str_default(section, "learn_rate_adjust_method", "feature_decay");
+            const char* method_str[] = {"FeatureDecay", "Decay", "Constant", "Shrink"};
+            if (method == "decay") {
+                _adjust_method = Decay;
+            } else if (method == "constant") {
+                _adjust_method = Constant;
+            } else if (method == "shrink") {
+                _adjust_method = Shrink;
+            } else if (method == "feature_decay") {
+                _adjust_method = FeatureDecay;
+            } else {
+                LOG_ERROR("Illegal adjust method: %s", method.c_str());
+                _adjust_method = FeatureDecay;
+            }
+            LOG_NOTICE("LEARNING_RATE_ADJUST_METHOD : %s", method_str[_adjust_method]);
+
+            _early_stop_N = conf.conf_int_default(section, "early_stop_n", -1);
+            LOG_NOTICE("early_stop_N: %d", _early_stop_N);
+
             _shrink_limit = conf.conf_int_default(section, "shrink_limit", 0);
             LOG_NOTICE("shrink_limit: %d", _shrink_limit);
+
+            _min_loss_diff = conf.conf_float_default(section, "min_loss_diff", 1e-6);
+            LOG_NOTICE("min_loss_diff=%f", _min_loss_diff);
         }
 
         virtual ~LogisticRegression_t() {
@@ -86,12 +116,16 @@ class LogisticRegression_t
             }
             _theta.b = random_05();
 
+            _theta_update_times = new size_t [_theta_num];
+            memset(_theta_update_times, 0, sizeof(size_t)*_theta_num);
+
             LOG_NOTICE("Begin to stat uniform infomation.");
             _uniform.stat(reader);
             LOG_NOTICE("Stat over.");
 
             // preprocess:
             //   - uniform.
+            /*
             LOG_NOTICE("Begin to preprocess.");
             Instance_t item;
             const char* temp_lr_file = "temp_lr_preprocess.bin";
@@ -107,6 +141,7 @@ class LogisticRegression_t
 
             _reader = new BinaryFeatureReader_t(temp_lr_file);
             _reader->reset();
+            */
 
             if (_use_momentum) {
                 _velo.set(_theta_num);
@@ -114,6 +149,8 @@ class LogisticRegression_t
         }
 
     private:
+        LearnRateAdjustMethod_t _adjust_method;
+
         Param_t _theta;
         int     _theta_num;
         MeanStdvar_Uniform _uniform;
@@ -128,14 +165,19 @@ class LogisticRegression_t
         bool    _use_momentum;
 
         // shrink in N.
+        int     _early_stop_N;
         int     _shrink_N;
         int     _shrink_times;
         int     _shrink_limit;
         float   _original_rate;
+        size_t  _update_times;
+        size_t  *_theta_update_times;
+        float   _min_loss_diff;
 
         // profile timer.
         Timer  _predict_tm;
         Timer  _calc_tm;
+        Timer  _uniform_tm;
         Timer  _total_update_tm;
 
         float predict_no_uniform(const Instance_t& uniformed_item) const {
@@ -150,22 +192,34 @@ class LogisticRegression_t
          *
          *  item is uniformed by preprocesser.
          */
-        virtual float _update(const Instance_t& item) {
+        virtual float _update(Instance_t& item) {
             _total_update_tm.begin();
+
+            _uniform_tm.begin();
+            _uniform.self_uniform(&item);
+            _uniform_tm.end();
 
             _predict_tm.begin();
             float p = predict_no_uniform(item);
             _predict_tm.end();
+
+            _update_times ++;
+            float cur_rate = _learn_rate;
+            if (_adjust_method == Decay || _adjust_method == FeatureDecay) {
+                cur_rate = _learn_rate / sqrt(_update_times);
+            } else if (_adjust_method == Constant || _adjust_method == Shrink) {
+                cur_rate = _learn_rate; 
+            }
             
             // @MAXL
             _calc_tm.begin();
             float desc = (item.label - p);
             if (_use_momentum) {
                 _velo.b = _velo.b * (1.0 - _momentum_ratio) + _momentum_ratio * desc;
-                _theta.b += _velo.b * _learn_rate;
+                _theta.b += _velo.b * cur_rate;
 
             } else {
-                _theta.b = _theta.b + desc * _learn_rate;
+                _theta.b = _theta.b + desc * cur_rate;
             }
             for (size_t i=0; i<item.features.size(); ++i) {
                 int index = item.features[i].index;
@@ -173,15 +227,20 @@ class LogisticRegression_t
                     continue;
                 }
 
+                if (_adjust_method == FeatureDecay) {
+                    _theta_update_times[index] ++;
+                    cur_rate = _learn_rate / sqrt(_theta_update_times[index]);
+                }
+
                 float x = item.features[i].value;
                 float gradient = desc * x;
 
                 if (_use_momentum) {
                     _velo.w[index] = _velo.w[index] * (1.0 - _momentum_ratio) + _momentum_ratio * gradient;
-                    _theta.w[index] += _velo.w[index] * _learn_rate;
+                    _theta.w[index] += _velo.w[index] * cur_rate;
 
                 } else {
-                    _theta.w[index] += gradient * _learn_rate;
+                    _theta.w[index] += gradient * cur_rate;
                 }
             }
             _calc_tm.end();
@@ -194,44 +253,70 @@ class LogisticRegression_t
             /* L2 Loss. */
             loss = 0.5 * (item.label - p) * (item.label - p);
             _total_update_tm.end();
+            //LOG_NOTICE("loss=%f", loss);
             return loss;
         }
 
         virtual void _epoch_end() {
-            LOG_NOTICE("TimeUsed=%f (pred=%f calc=%f)", 
+            LOG_NOTICE("TimeUsed=%f (uniform=%f pred=%f calc=%f)", 
                     _total_update_tm.cost_time(),
+                    _uniform_tm.cost_time(),
                     _predict_tm.cost_time(), 
                     _calc_tm.cost_time());
             _total_update_tm.clear();
             _predict_tm.clear();
             _calc_tm.clear();
+            _uniform_tm.clear();
 
-            if (_epoch_loss < _best_loss - _learn_rate * _epoch_loss) {
-                float loss_improvement = _best_loss - _epoch_loss;
-                _best_loss = _epoch_loss;
-                _best_theta = _theta;
-                _best_round = _iter_round;
-                LOG_NOTICE("Round %d: accept param. loss=%.8f, rate=%f (d=%.8f m=%.8f)", 
-                        _iter_round, _epoch_loss, _learn_rate, loss_improvement,
-                        _learn_rate * _epoch_loss);
+            float expect_loss_inc = _learn_rate * _epoch_loss;
+            LOG_NOTICE("Round %d: loss=%.8f best_loss=%.8f cur_rate=%f", 
+                    _iter_round, _epoch_loss, _best_loss, _learn_rate);
+            LOG_NOTICE("          loss_inc=%.8f min_loss=%f exp_loss=%f",
+                    _best_loss - _epoch_loss,
+                    _min_loss,
+                    expect_loss_inc);
 
-                /*
-                if (_original_rate != _learn_rate) {
-                    _learn_rate = _original_rate;
-                    _shrink_times = 0;
-                    LOG_NOTICE("Recover rate.");
-                }*/
-
+            bool improvment = false;
+            bool big_improvement = false;
+            int no_progress_in_N = -1;
+            if (_epoch_loss < _best_loss - _min_loss_diff) {
+                improvment = true;
+                if (_epoch_loss < _best_loss - expect_loss_inc) {
+                    big_improvement = true;
+                }
             } else {
-                int no_progress_in_N = _iter_round - _best_round;
-                LOG_NOTICE("Round %d: REJECT param. loss=%f(best_loss=%f) [no_progress_in_N=%d]", 
-                        _iter_round, _epoch_loss, _best_loss, no_progress_in_N);
-                if (no_progress_in_N >= _shrink_N) {
-                    _shrink_times ++;
-                    LOG_NOTICE("Shrink! %f -> %f (%d/%d times)", _learn_rate, _learn_rate*0.5, _shrink_times, _shrink_limit);
-                    _learn_rate *= 0.5;
+                no_progress_in_N = _iter_round - _best_round;
+            }
 
-                    if (_shrink_times > _shrink_limit) {
+            // Shrink update.
+            if (_adjust_method == Shrink) {
+                if (big_improvement) {
+                    _best_loss = _epoch_loss;
+                    _best_theta = _theta;
+                    _best_round = _iter_round;
+                    LOG_NOTICE("ShrinkAdjust: accept param.");
+
+                } else {
+                    LOG_NOTICE("ShrinkAdjust: REJECT param."); 
+                    if (no_progress_in_N >= _shrink_N) {
+                        _shrink_times ++;
+                        LOG_NOTICE("Shrink! %f -> %f (%d/%d times)", _learn_rate, _learn_rate*0.5, _shrink_times, _shrink_limit);
+                        _learn_rate *= 0.5;
+
+                        if (_shrink_times > _shrink_limit) {
+                            _force_stop = true;
+                        }
+                    }
+                }
+            } else {
+                if (improvment) {
+                    _best_loss = _epoch_loss;
+                    _best_theta = _theta;
+                    _best_round = _iter_round;
+                } else {
+                    if (_early_stop_N>=0 && no_progress_in_N > _early_stop_N) {
+                        LOG_NOTICE("NO_PROGRESS_IN_N[%d] > EARLY_STOP_N[%d], stop!!",
+                                no_progress_in_N, _early_stop_N);
                         _force_stop = true;
                     }
                 }
@@ -244,6 +329,7 @@ class LogisticRegression_t
         }
 
         virtual void _train_begin() {
+            _update_times = 0;
             _original_rate = _learn_rate;
             _shrink_N = 0;
         }

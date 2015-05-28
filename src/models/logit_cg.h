@@ -158,7 +158,7 @@ class CG_LogisticRegression_t
         /**
          *  get gradient of loss.
          */
-        virtual float _update(const Instance_t& item) {
+        virtual float _update(Instance_t& item) {
             float p = predict(item);
             
             // gradient of @L2
