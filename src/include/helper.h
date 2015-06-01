@@ -191,12 +191,35 @@ void split(char* s, const char* token, std::vector<std::string>& out) {
     return ;
 }
 
+template <typename PtrType_t>
+class ThreadData_t {
+    public:
+        ThreadData_t(PtrType_t a) {
+            _data = a;
+            pthread_mutex_init(&_lock, 0);
+        }
+
+        PtrType_t borrow() {
+            pthread_mutex_lock(&_lock);
+            return _data;
+        }
+
+        void give_back() {
+            pthread_mutex_unlock(&_lock);
+        }
+
+    private:
+        PtrType_t _data;
+        pthread_mutex_t _lock;
+};
+
 /*
  * Producer and Customer Poot
  * Condition: 
  *      _p_id + 1 != _c_id
  *      _c_id + 2 != _p_id (..)
  * one empty cell to make validation.
+ *  * Single putter and multi-getter.
  */
 template <typename T>
 class PCPool_t {
@@ -210,7 +233,6 @@ class PCPool_t {
             _total_put = 0;
             _flag_putting = true;
             pthread_spin_init(&_spinlock, 0);
-            pthread_spin_init(&_spinlock_p, 0);
         }
         ~PCPool_t() {
             if (_buffer) {
@@ -242,6 +264,7 @@ class PCPool_t {
                 size_t next_id = (_p_id + 1) % _buffer_size;
                 if (next_id == _c_id) {
                     // full: need to wait for putting.
+                    //LOG_NOTICE("full: %d,%d (%d)", _p_id, _c_id, _total_put);
                     continue;
                 }
                 return _buffer + _p_id;
@@ -266,7 +289,7 @@ class PCPool_t {
                     pthread_spin_unlock(&_spinlock);
                     // need to wait for processing.
                     if (!_flag_putting) {
-                        LOG_NOTICE("return false");
+                        //LOG_NOTICE("return false");
                         return false;
                     }
                     continue;
@@ -277,7 +300,7 @@ class PCPool_t {
                     continue;
                 }
                 size_t m = _c_id;
-                //LOG_NOTICE("%d %d", _c_id, _p_id);
+                //LOG_NOTICE("get: %d,%d (%d)", _p_id, _c_id, _total_put);
                 _c_id = (_c_id + 1) % _buffer_size;
                 _total_get += 1;
                 *out_item = _buffer[m];
@@ -298,15 +321,14 @@ class PCPool_t {
     private:
         T*      _buffer;
         size_t  _buffer_size;
-        size_t  _c_id;
-        size_t  _p_id;
+        volatile size_t  _c_id;
+        volatile size_t  _p_id;
         bool    _flag_putting;
 
         size_t  _total_get;
         size_t  _total_put;
 
         pthread_spinlock_t _spinlock;
-        pthread_spinlock_t _spinlock_p;
 };
 
 

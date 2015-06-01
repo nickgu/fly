@@ -125,7 +125,6 @@ class LogisticRegression_t
 
             // preprocess:
             //   - uniform.
-            /*
             LOG_NOTICE("Begin to preprocess.");
             Instance_t item;
             const char* temp_lr_file = "temp_lr_preprocess.bin";
@@ -141,7 +140,6 @@ class LogisticRegression_t
 
             _reader = new BinaryFeatureReader_t(temp_lr_file);
             _reader->reset();
-            */
 
             if (_use_momentum) {
                 _velo.set(_theta_num);
@@ -195,9 +193,11 @@ class LogisticRegression_t
         virtual float _update(Instance_t& item) {
             _total_update_tm.begin();
 
+            /*
             _uniform_tm.begin();
             _uniform.self_uniform(&item);
             _uniform_tm.end();
+            */
 
             _predict_tm.begin();
             float p = predict_no_uniform(item);

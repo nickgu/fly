@@ -17,61 +17,121 @@
 
 #include "all_models.h"
 
-float test_auc(FlyReader_t* treader, GBDT_t* model, FILE* dump_feature_binary_file, bool output_mean, bool output_path) {
-    treader->reset();
-    Instance_t item;
+struct TestJob_t {
+    int job_id;
+    PCPool_t<Instance_t>* pool;
+    FlyReader_t* reader;
     FArray_t<ResultPair_t> ans_list;
+    GBDT_t* model;
+
+    ThreadData_t<FILE*>* binary_output;
+    bool output_path;
+    bool output_mean;
+    int base_dim;
+    int tree_node_count;
+};
+
+void* thread_test(void* c) {
+    TestJob_t& job = *(TestJob_t*)c;
+    if (job.reader) {
+        LOG_NOTICE("thread[%d] : I am a reader.", job.job_id);
+        size_t c = 0;
+        while (1) {
+            Instance_t* cell = job.pool->begin_put();
+            if (!job.reader->read(cell)) {
+                job.pool->end_put(false);
+                break;
+            }
+            if (c % 2000000 == 0) {
+                LOG_NOTICE("complete %d puts.", c);
+            }
+            job.pool->end_put();
+            c ++;
+        }
+        LOG_NOTICE("reader: load over. count=%d", c);
+        job.pool->set_putting(false);
+    } else {
+        LOG_NOTICE("thread[%d] : I am a worker.", job.job_id);
+        job.ans_list.clear();
+        Instance_t item;
+        while (job.pool->get(&item)) {
+            float ans;
+            std::vector<int> leaves;
+            std::vector<float> means;
+            if (job.binary_output) {
+                ans = job.model->predict_and_get_leaves(item, &leaves, &means);
+                // make it sparse.
+                for (size_t i=0; i<leaves.size(); ++i) {
+                    IndValue_t iv; 
+                    iv.index = job.base_dim + i*job.tree_node_count + leaves[i];
+                    if (job.output_mean) {
+                        iv.value = means[i];
+                    } else {
+                        iv.value = 1.0;
+                    }
+                    if (!job.output_mean && job.output_path) {
+                        int l = leaves[i];
+                        while (l) {
+                            l = (l-1)/2;
+                            IndValue_t temp_iv; 
+                            temp_iv.index = job.base_dim + i*job.tree_node_count + l;
+                            temp_iv.value = 1.0;
+                            item.features.push_back(temp_iv);
+                        }
+                    }
+                    item.features.push_back(iv);
+                }
+                FILE* output_fp = job.binary_output->borrow();
+                item.write_binary(output_fp);
+                job.binary_output->give_back();
+            } else {
+                ans = job.model->predict(item);
+            }
+            job.ans_list.push_back(ResultPair_t(item.label, ans));
+        }
+        LOG_NOTICE("thread[%d] : over. %d processed.", job.job_id, job.ans_list.size());
+    }
+    return NULL;
+}
+
+float test_auc(FlyReader_t* treader, GBDT_t* model, FILE* dump_feature_binary_file, bool output_mean, bool output_path) {
+    size_t ThreadNum = 12;
+    TestJob_t* jobs = new TestJob_t[ThreadNum];
+    PCPool_t<Instance_t> pool(2000000);
+    ThreadData_t<FILE*>* output_data = NULL;
+    if (dump_feature_binary_file) {
+        output_data = new ThreadData_t<FILE*>(dump_feature_binary_file);
+    }
     int base_dim = treader->dim();
     int tree_node_count = model->tree_node_count();
-    int percent = 0;
-    int cnt = 0;
 
-    LOG_NOTICE("Transform: base_dim=%d tree_node_count=%d", base_dim, tree_node_count);
-    while (treader->read(&item)) {
-        std::vector<int> leaves;
-        std::vector<float> means;
-        float ret;
-        float node_sum = 0;
-        if (dump_feature_binary_file) {
-            ret = model->predict_and_get_leaves(item, &leaves, &means);
-            // make it sparse.
-            for (size_t i=0; i<leaves.size(); ++i) {
-                IndValue_t iv; 
-                iv.index = base_dim + i*tree_node_count + leaves[i];
-                node_sum += means[i];
-                if (output_mean) {
-                    iv.value = means[i];
-                } else {
-                    iv.value = 1.0;
-                }
-                if (!output_mean && output_path) {
-                    int l = leaves[i];
-                    while (l) {
-                        l = (l-1)/2;
-                        IndValue_t temp_iv; 
-                        temp_iv.index = base_dim + i*tree_node_count + l;
-                        temp_iv.value = 1.0;
-                        item.features.push_back(temp_iv);
-                    }
-                }
-                item.features.push_back(iv);
-            }
-            item.write_binary(dump_feature_binary_file);
+    for (size_t i=0; i<ThreadNum; ++i) {
+        jobs[i].pool = &pool;
+        jobs[i].job_id = i;
+        jobs[i].reader = NULL;
+        jobs[i].model = model;
 
-        } else {
-            ret = model->predict(item);
-        }
-        ans_list.push_back(ResultPair_t(item.label, ret));
+        jobs[i].binary_output = output_data;
+        jobs[i].output_mean = output_mean;
+        jobs[i].output_path = output_path;
+        jobs[i].base_dim = base_dim;
+        jobs[i].tree_node_count = tree_node_count;
+    }
+    jobs[0].reader = treader;
 
-        cnt += 1;
-        int p = treader->percentage();
-        if (p>percent) {
-            percent = p;
-            fprintf(stderr, "%cProgress: %d%% (%d/%d)", 13, percent, cnt, treader->size()); 
+    multi_thread_jobs(thread_test, jobs, ThreadNum, ThreadNum);
+    LOG_NOTICE("thread work is over.");
+    FArray_t<ResultPair_t> total_list;
+    for (size_t i=0; i<ThreadNum; ++i) {
+        for (size_t j=0; j<jobs[i].ans_list.size(); ++j) {
+            total_list.push_back( jobs[i].ans_list[j] );
         }
     }
-
-    float auc = calc_auc(ans_list.size(), ans_list.buffer());
+    LOG_NOTICE("merge ans list over.");
+    float auc = calc_auc(total_list.size(), total_list.buffer());
+    if (output_data) {
+        delete [] output_data;
+    }
     return auc;
 }
 

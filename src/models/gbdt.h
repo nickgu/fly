@@ -250,7 +250,6 @@ class GBDT_t
             _trees(NULL),
             _ffd(NULL),
             _sorted_fields(NULL),
-            _predict_buffer(NULL),
             _compact_trees(NULL),
             _mean(NULL),
             _feature_weight(NULL),
@@ -339,10 +338,6 @@ class GBDT_t
                 _sorted_fields = NULL;
             }
 
-            if (_predict_buffer) {
-                delete [] _predict_buffer;
-                _predict_buffer = NULL;
-            }
             LOG_NOTICE("Destroy work for GBDT ends");
         }
 
@@ -359,11 +354,13 @@ class GBDT_t
                 vector<float>* output_mean) const 
         {
             float ret = 0.0f;
+            // bad performance.
+            float *predict_buffer = new float [_dim_count];
 
-            memset(_predict_buffer, 0, sizeof(float) * _dim_count);
+            memset(predict_buffer, 0, sizeof(float) * _dim_count);
             for (size_t f=0; f<ins.features.size(); ++f) {
                 if (ins.features[f].index < _dim_count) {
-                    _predict_buffer[ins.features[f].index] = ins.features[f].value;
+                    predict_buffer[ins.features[f].index] = ins.features[f].value;
                 }
             }
 
@@ -387,7 +384,7 @@ class GBDT_t
                     SmallTreeNode_t* node = (*tree)+nid;
                     if (node->fidx != -1) {
                         nid = _L(nid);
-                        if (_predict_buffer[node->fidx] >= node->threshold) {
+                        if (predict_buffer[node->fidx] >= node->threshold) {
                             nid ++;
                         }
                     } else {
@@ -402,6 +399,7 @@ class GBDT_t
                 }
                 ret += _mean[tree - _compact_trees][nid];
             }
+            delete [] predict_buffer;
             return ret;
         }
 
@@ -453,11 +451,6 @@ class GBDT_t
                     }
                 }
             }
-            if (_predict_buffer) {
-                delete [] _predict_buffer;
-                _predict_buffer = NULL;
-            }
-            _predict_buffer = new float[_dim_count];
             return ;
         }
 
@@ -472,11 +465,6 @@ class GBDT_t
             }
             _feature_weight = new float[_dim_count];
             memset(_feature_weight, 0, sizeof(float)*_dim_count);
-            if (_predict_buffer) {
-                delete [] _predict_buffer;
-                _predict_buffer = NULL;
-            }
-            _predict_buffer = new float[_dim_count];
 
             _labels = new ItemInfo_t[_item_count];
             _ffd = new FILE*[_dim_count];
@@ -866,7 +854,6 @@ class GBDT_t
         ItemInfo_t*     _labels;
         FILE**          _ffd;
         SortedIndex_t** _sorted_fields;
-        float*          _predict_buffer;
 
         uint32_t  _item_count;
         int     _dim_count;
