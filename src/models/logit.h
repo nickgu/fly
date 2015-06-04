@@ -19,19 +19,157 @@
 #include "iter.h"
 #include "uniform.h"
 
+enum LearnRateAdjustMethod_t {
+    FeatureDecay = 0,
+    GradientFeatureDecay,
+    Decay,
+    Constant,
+};
+
+class LogitSolver:
+    public Updatable_t
+{
+    public:
+        LogitSolver(size_t theta_num, 
+                    const Param_t& cur_param, 
+                    MeanStdvar_Uniform* uniformer,
+                    float learn_rate,
+                    LearnRateAdjustMethod_t decay_method,
+                    const Param_t& decay,
+                    bool preuniform);
+
+        ~LogitSolver();
+
+        float update(Instance_t& item);
+
+    public:
+        Param_t _theta;
+        int     _theta_num;
+        MeanStdvar_Uniform* _uniform;
+
+        float   _learn_rate;
+        LearnRateAdjustMethod_t _decay_method;
+        Param_t _decay;
+
+        // pre-uniform.
+        bool _pre_uniform;
+};
+
+LogitSolver::~LogitSolver() {
+}
+
+LogitSolver::LogitSolver(size_t theta_num, 
+                const Param_t& cur_param, 
+                MeanStdvar_Uniform* uniformer,
+                float learn_rate,
+                LearnRateAdjustMethod_t decay_method,
+                const Param_t& decay,
+                bool preuniform):
+    _theta(cur_param),
+    _theta_num(theta_num),
+    _uniform(uniformer),
+    _learn_rate(learn_rate),
+    _decay_method(decay_method),
+    _decay(decay),
+    _pre_uniform(preuniform)
+{
+}    
+
+float LogitSolver::update(Instance_t& item) {
+    if (!_pre_uniform) {
+        _uniform->self_uniform(&item);
+    }
+
+    float cur_rate = _learn_rate;
+    float p = sigmoid( sparse_dot(_theta, item.features) );
+    float desc = (item.label - p);
+    float reg = 0;
+    float reg_weight = 0.05;
+
+    if (_decay_method == FeatureDecay || _decay_method == Decay) {
+        _decay.b += 1.0;
+        cur_rate = _learn_rate / (1.0 + sqrt(_decay.b));
+    } else if (_decay_method == GradientFeatureDecay) {
+        _decay.b += desc * desc;
+        cur_rate = _learn_rate / (1.0 + sqrt(_decay.b));
+    }
+    reg = _theta.b * -reg_weight;
+    _theta.b = _theta.b + (desc + reg) * cur_rate;
+    for (size_t i=0; i<item.features.size(); ++i) {
+        int index = item.features[i].index;
+        if (index >= _theta_num) {
+            continue;
+        }
+
+        float x = item.features[i].value;
+        float gradient = desc * x;
+
+        if (_decay_method == FeatureDecay) {
+            _decay.w[index] += 1.0;
+            cur_rate = _learn_rate / (1.0 + sqrt(_decay.w[index]));
+        } else if (_decay_method == GradientFeatureDecay) {
+            _decay.w[index] += gradient * gradient;
+            cur_rate = _learn_rate / (1.0 + sqrt(_decay.w[index]));
+        }
+
+        reg = _theta.w[index] * -reg_weight;
+        _theta.w[index] += (gradient + reg) * cur_rate;
+    }
+
+    float loss = 0.0;
+    loss = 0.5 * (item.label - p) * (item.label - p);
+    return loss;
+}
+
+struct UniformerJob_t {
+    int job_id;
+    FlyReader_t* reader;
+    PCPool_t<Instance_t>* pool;
+    MeanStdvar_Uniform* uniformer;
+    ThreadData_t<FILE*>* output_fp;
+};
+
+void* thread_uniformer(void* c) {
+    UniformerJob_t &job = *(UniformerJob_t*)c;
+    if (job.reader) {
+        LOG_NOTICE("thread[%d] : I am a reader.", job.job_id);
+        size_t c = 0;
+        while (1) {
+            Instance_t* cell = job.pool->begin_put();
+            if (!job.reader->read(cell)) {
+                job.pool->end_put(false);
+                break;
+            }
+            job.pool->end_put();
+            c ++;
+        }
+        LOG_NOTICE("reader: load over. count=%d", c);
+        job.pool->set_putting(false);
+
+    } else {
+        LOG_NOTICE("thread[%d] : I am a worker.", job.job_id);
+        Instance_t item;
+        int count = 0;
+        while (job.pool->get(&item)) {
+            job.uniformer->self_uniform(&item);
+            FILE* out = job.output_fp->borrow();
+            item.write_binary(out);
+            job.output_fp->give_back();
+            count ++;
+        }
+        LOG_NOTICE("thread[%d] : over. %d processed.", job.job_id, count);
+    }
+    return NULL;
+}
+
+
 class LogisticRegression_t 
     : public IterModel_t
 {
-    enum LearnRateAdjustMethod_t {
-        FeatureDecay = 0,
-        Decay,
-        Constant,
-        Shrink
-    };
-
     public:
         LogisticRegression_t(const Config_t& conf, const char* section):
             IterModel_t(conf, section),
+            _continuous_training(false),
             _theta_num(0),
             _best_loss(1.0)
         {
@@ -44,29 +182,39 @@ class LogisticRegression_t
 
             string method;
             method = conf.conf_str_default(section, "learn_rate_adjust_method", "feature_decay");
-            const char* method_str[] = {"FeatureDecay", "Decay", "Constant", "Shrink"};
+            const char* method_str[] = {"FeatureDecay", "GradientFeatureDecay", "Decay", "Constant"};
             if (method == "decay") {
                 _adjust_method = Decay;
             } else if (method == "constant") {
                 _adjust_method = Constant;
-            } else if (method == "shrink") {
-                _adjust_method = Shrink;
+            } else if (method == "gradient_feature_decay") {
+                _adjust_method = GradientFeatureDecay;
             } else if (method == "feature_decay") {
                 _adjust_method = FeatureDecay;
             } else {
                 LOG_ERROR("Illegal adjust method: %s", method.c_str());
-                _adjust_method = FeatureDecay;
+                _adjust_method = GradientFeatureDecay;
             }
             LOG_NOTICE("LEARNING_RATE_ADJUST_METHOD : %s", method_str[_adjust_method]);
 
             _early_stop_N = conf.conf_int_default(section, "early_stop_n", -1);
             LOG_NOTICE("early_stop_N: %d", _early_stop_N);
 
-            _shrink_limit = conf.conf_int_default(section, "shrink_limit", 0);
-            LOG_NOTICE("shrink_limit: %d", _shrink_limit);
+            _pre_uniform = conf.conf_int_default(section, "preuniform", 0);
+            LOG_NOTICE("pre-uniform: %d", _pre_uniform);
 
             _min_loss_diff = conf.conf_float_default(section, "min_loss_diff", 1e-6);
             LOG_NOTICE("min_loss_diff=%f", _min_loss_diff);
+
+            _use_shrink = conf.conf_int_default(section, "use_shrink", 0);
+            _shrink_limit = conf.conf_int_default(section, "shrink_limit", 0);
+            LOG_NOTICE("use_shrink:%d shrink_limit:%d", _use_shrink, _shrink_limit);
+
+            _middle_dump_dir = conf.conf_str_default(section, "middle_dump_dir", "");
+            _middle_dump_interval = conf.conf_int_default(section, "middle_dump_interval", -1);
+            if (_middle_dump_interval>=1) {
+                LOG_NOTICE("in turn dump model: output_dir=[%s], interval=%d", _middle_dump_dir.c_str(), _middle_dump_interval);
+            }
         }
 
         virtual ~LogisticRegression_t() {
@@ -102,44 +250,65 @@ class LogisticRegression_t
                 int tmp;
                 fscanf(stream, "%d:%f\n", &tmp, _theta.w+i);
             }
+            _continuous_training = true;
         }
 
         virtual void init(FlyReader_t* reader) {
             IterModel_t::init(reader);
 
-            _theta_num = reader->dim();
-            LOG_NOTICE("theta_dim = %d", _theta_num);
+            if (_continuous_training) {
+                LOG_NOTICE("ContinuousTrining: will skip theta initialization and uniform intialization.");
 
-            _theta.set(_theta_num);
-            for (int i=0; i<_theta_num; ++i) {
-                _theta.w[i] = random_05();
-            }
-            _theta.b = random_05();
+            } else {
+                _theta_num = reader->dim();
+                LOG_NOTICE("theta_dim = %d", _theta_num);
 
-            _theta_update_times = new size_t [_theta_num];
-            memset(_theta_update_times, 0, sizeof(size_t)*_theta_num);
+                _theta.set(_theta_num);
+                for (int i=0; i<_theta_num; ++i) {
+                    _theta.w[i] = random_05();
+                }
+                _theta.b = random_05();
 
-            LOG_NOTICE("Begin to stat uniform infomation.");
-            _uniform.stat(reader);
-            LOG_NOTICE("Stat over.");
+                LOG_NOTICE("Begin to stat uniform infomation.");
+                _uniform.stat(reader);
+                LOG_NOTICE("Stat over.");
+
+            } 
+
+            // init theta decay.
+            _decay.set(_theta_num);
 
             // preprocess:
             //   - uniform.
-            LOG_NOTICE("Begin to preprocess.");
-            Instance_t item;
-            const char* temp_lr_file = "temp_lr_preprocess.bin";
-            FILE* temp_file = fopen(temp_lr_file, "wb");
-            reader->reset();
-            while (reader->read(&item)) {
-                Instance_t out_item;
-                _uniform.uniform(&out_item, item);
-                out_item.write_binary(temp_file);
-            }
-            fclose(temp_file);
-            LOG_NOTICE("End preprocess.");
+            if (_pre_uniform) {
+                LOG_NOTICE("Begin to pre-uniform.");
+                int thread_num = 11;
+                UniformerJob_t jobs[thread_num];
+                PCPool_t<Instance_t> *pool = new PCPool_t<Instance_t>(2000000);
+                const char* temp_lr_file = "temp_lr_preprocess.bin";
+                FILE* output_file = fopen(temp_lr_file, "wb");
+                ThreadData_t<FILE*> *out = new ThreadData_t<FILE*>(output_file);
+                for (int i=0; i<thread_num; ++i) {
+                    jobs[i].reader = NULL;
+                    jobs[i].pool = pool;
+                    jobs[i].job_id = i;
+                    jobs[i].output_fp = out;
+                    jobs[i].uniformer = &_uniform;
+                } 
+                jobs[0].reader = reader;
+                reader->reset();
 
-            _reader = new BinaryFeatureReader_t(temp_lr_file);
-            _reader->reset();
+                multi_thread_jobs(thread_uniformer, jobs, thread_num, thread_num);
+
+                LOG_NOTICE("End preprocess.");
+
+                fclose(output_file);
+                delete out;
+                delete pool;
+
+                _reader = new BinaryFeatureReader_t(temp_lr_file);
+                _reader->reset();
+            }
 
             if (_use_momentum) {
                 _velo.set(_theta_num);
@@ -147,8 +316,8 @@ class LogisticRegression_t
         }
 
     private:
-        LearnRateAdjustMethod_t _adjust_method;
 
+        bool    _continuous_training;
         Param_t _theta;
         int     _theta_num;
         MeanStdvar_Uniform _uniform;
@@ -157,20 +326,25 @@ class LogisticRegression_t
         float   _best_loss;
         int     _best_round;
 
+        LearnRateAdjustMethod_t _adjust_method;
+        Param_t _decay;
+
         // optima.
         Param_t _velo;
         float   _momentum_ratio;
         bool    _use_momentum;
 
-        // shrink in N.
         int     _early_stop_N;
-        int     _shrink_N;
-        int     _shrink_times;
-        int     _shrink_limit;
         float   _original_rate;
-        size_t  _update_times;
-        size_t  *_theta_update_times;
         float   _min_loss_diff;
+
+        // shrink in N.
+        bool    _use_shrink;
+        int     _shrink_limit;
+        int     _shrink_times;
+
+        // pre-uniform.
+        bool _pre_uniform;
 
         // profile timer.
         Timer  _predict_tm;
@@ -178,10 +352,15 @@ class LogisticRegression_t
         Timer  _uniform_tm;
         Timer  _total_update_tm;
 
+        // dump model on training process.
+        string  _middle_dump_dir;
+        int     _middle_dump_interval;
+
         float predict_no_uniform(const Instance_t& uniformed_item) const {
             return sigmoid( sparse_dot(_theta, uniformed_item.features) );
         }
 
+#if 0
         /**
          *  input:
          *      target, X.
@@ -193,21 +372,20 @@ class LogisticRegression_t
         virtual float _update(Instance_t& item) {
             _total_update_tm.begin();
 
-            /*
-            _uniform_tm.begin();
-            _uniform.self_uniform(&item);
-            _uniform_tm.end();
-            */
+            if (!_pre_uniform) {
+                _uniform_tm.begin();
+                _uniform.self_uniform(&item);
+                _uniform_tm.end();
+            }
 
             _predict_tm.begin();
             float p = predict_no_uniform(item);
             _predict_tm.end();
 
-            _update_times ++;
             float cur_rate = _learn_rate;
             if (_adjust_method == Decay || _adjust_method == FeatureDecay) {
                 cur_rate = _learn_rate / sqrt(_update_times);
-            } else if (_adjust_method == Constant || _adjust_method == Shrink) {
+            } else if (_adjust_method == Constant) {
                 cur_rate = _learn_rate; 
             }
             
@@ -255,10 +433,12 @@ class LogisticRegression_t
             _total_update_tm.end();
             //LOG_NOTICE("loss=%f", loss);
             return loss;
+            return 0;
         }
+#endif
 
         virtual void _epoch_end() {
-            LOG_NOTICE("TimeUsed=%f (uniform=%f pred=%f calc=%f)", 
+            LOG_NOTICE("TimeUpdateUsed=%f (uniform=%f pred=%f calc=%f)", 
                     _total_update_tm.cost_time(),
                     _uniform_tm.cost_time(),
                     _predict_tm.cost_time(), 
@@ -271,54 +451,56 @@ class LogisticRegression_t
             float expect_loss_inc = _learn_rate * _epoch_loss;
             LOG_NOTICE("Round %d: loss=%.8f best_loss=%.8f cur_rate=%f", 
                     _iter_round, _epoch_loss, _best_loss, _learn_rate);
-            LOG_NOTICE("          loss_inc=%.8f min_loss=%f exp_loss=%f",
+            LOG_NOTICE("          loss_inc=%.8f min_loss=%f exp_loss_inc=%f",
                     _best_loss - _epoch_loss,
                     _min_loss,
                     expect_loss_inc);
 
-            bool improvment = false;
+            // check improvement type.
+            bool improvement = false;
             bool big_improvement = false;
             int no_progress_in_N = -1;
             if (_epoch_loss < _best_loss - _min_loss_diff) {
-                improvment = true;
+                improvement = true;
                 if (_epoch_loss < _best_loss - expect_loss_inc) {
                     big_improvement = true;
                 }
             } else {
                 no_progress_in_N = _iter_round - _best_round;
+                LOG_NOTICE("No progress in %d iteration(s)", no_progress_in_N)
             }
 
-            // Shrink update.
-            if (_adjust_method == Shrink) {
-                if (big_improvement) {
-                    _best_loss = _epoch_loss;
-                    _best_theta = _theta;
-                    _best_round = _iter_round;
-                    LOG_NOTICE("ShrinkAdjust: accept param.");
-
-                } else {
-                    LOG_NOTICE("ShrinkAdjust: REJECT param."); 
-                    if (no_progress_in_N >= _shrink_N) {
-                        _shrink_times ++;
-                        LOG_NOTICE("Shrink! %f -> %f (%d/%d times)", _learn_rate, _learn_rate*0.5, _shrink_times, _shrink_limit);
-                        _learn_rate *= 0.5;
-
-                        if (_shrink_times > _shrink_limit) {
-                            _force_stop = true;
-                        }
-                    }
-                }
+            // accept or reject the parameters.
+            if (improvement) {
+                _best_loss = _epoch_loss;
+                _best_theta = _theta;
+                _best_round = _iter_round;
             } else {
-                if (improvment) {
-                    _best_loss = _epoch_loss;
-                    _best_theta = _theta;
-                    _best_round = _iter_round;
-                } else {
-                    if (_early_stop_N>=0 && no_progress_in_N > _early_stop_N) {
-                        LOG_NOTICE("NO_PROGRESS_IN_N[%d] > EARLY_STOP_N[%d], stop!!",
-                                no_progress_in_N, _early_stop_N);
-                        _force_stop = true;
-                    }
+                LOG_NOTICE("Reject theta update.");
+                if (_early_stop_N>=0 && no_progress_in_N > _early_stop_N) {
+                    LOG_NOTICE("NO_PROGRESS_IN_N[%d] > EARLY_STOP_N[%d], stop!!",
+                            no_progress_in_N, _early_stop_N);
+                    _force_stop = true;
+                }
+            }
+
+            // shrink learn_rate.
+            if (!improvement && _use_shrink) {
+                _shrink_times ++;
+                LOG_NOTICE("Shrink! %f -> %f (%d/%d times)", _learn_rate, _learn_rate*0.5, _shrink_times, _shrink_limit);
+                _learn_rate *= 0.5;
+                if (_shrink_times > _shrink_limit) {
+                    _force_stop = true;
+                }
+            }
+
+            if (_middle_dump_interval >= 1) {
+                if (_iter_round % _middle_dump_interval == 0 && _iter_round>0) {
+                    char filename_buffer[128];
+                    snprintf(filename_buffer, sizeof(filename_buffer), "%s/epoch.%ld.model", _middle_dump_dir.c_str(), _iter_round);
+                    FILE* out_fp = fopen(filename_buffer, "w");
+                    write_model(out_fp);
+                    fclose(out_fp);
                 }
             }
         }
@@ -329,9 +511,45 @@ class LogisticRegression_t
         }
 
         virtual void _train_begin() {
-            _update_times = 0;
             _original_rate = _learn_rate;
-            _shrink_N = 0;
+        }
+
+
+        Updatable_t* _new_updatable_object() {
+            LogitSolver* solver = new LogitSolver(
+                    _theta_num, 
+                    _theta,
+                    &_uniform,
+                    _learn_rate,
+                    _adjust_method,
+                    _decay,
+                    _pre_uniform);
+            return solver;
+        }
+
+        void _join_updatable(Updatable_t** updatable, size_t num) {
+            _theta.b = 0;
+            for (size_t i=0; i<_theta.sz; ++i) {
+                _theta.w[i] = 0;
+            }
+
+            for (size_t i=0; i<num; ++i) {
+                LogitSolver* solver = (LogitSolver*)updatable[i];
+                // inc param. 
+                _theta += solver->_theta;
+
+                // inc update_times.
+                _decay.b = max(solver->_decay.b, _decay.b);
+                for (int i=0; i<_theta_num; ++i) {
+                    _decay.w[i] = max(solver->_decay.w[i], _decay.w[i]);
+                }
+                delete solver;
+            }
+
+            _theta.b /= num;
+            for (size_t i=0; i<_theta.sz; ++i) {
+                _theta.w[i] /= num;
+            }
         }
 };
 

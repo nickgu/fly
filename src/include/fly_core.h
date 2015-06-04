@@ -167,7 +167,6 @@ class BinaryFileIO_t {
         char    _line_buffer[MaxLineLength];
 };
 
-
 class BinaryFeatureReader_t 
     : public FlyReader_t
 {
@@ -233,7 +232,7 @@ class BinaryFeatureReader_t
             _cur_id = 0;
             _size = 0;
             _theta_num = 0;
-            LOG_NOTICE("Preprocess..");
+            LOG_NOTICE("Preprocess(Stat theta_num and item_num)..");
             fseek(_stream, 0, SEEK_SET);
             while ( !feof(_stream) ) {
                 Instance_t new_item;
@@ -334,6 +333,7 @@ class FeatureReader_t
             _buffer.clear();
             _theta_num = 0;
             char line[MaxLineLength];
+            size_t c = 0;
             while (fgets(line, sizeof(line), _stream)) {
                 Instance_t new_item;
                 new_item.parse_item(line);
@@ -346,6 +346,7 @@ class FeatureReader_t
                     }
                 }
 
+                c++;
                 size_t process_size = ftell(_stream);
                 int cur_per = int(process_size * 100.0f / total_file_size);
                 if (cur_per > percentage) {
@@ -356,6 +357,7 @@ class FeatureReader_t
                 }
             }
             fprintf(stderr, "\n");
+            LOG_NOTICE("record_num=%d, dim=%d", c, _theta_num);
             fclose(_stream);
             _stream = NULL;
         }

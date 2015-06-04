@@ -23,5 +23,5 @@ fly_debug: fly.cc
 	$(COMPILER) $^ -o $@ $(LIBS) $(DEBUG_CPPFLAGS) $(INCLUDES) 
 
 clean:
-	rm -rf *.o *.so *~ $(TARGET) models/*~
+	rm -rf *.o *.so *~ $(TARGET) models/*~ include/*~ 
 

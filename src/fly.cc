@@ -15,6 +15,8 @@
 
 #include "all_models.h"
 
+void test(FlyReader_t* treader, FlyModel_t* model, int thread_num);
+
 void show_help() {
     fprintf(stderr, 
 "Usage: \n\
@@ -32,6 +34,7 @@ void show_help() {
         -s --section   : which section will be used when config is loaded. \n\
         -t --transform : output binary file, if this set, other training will be ignored. \n\
         -d --debug     : debug mode. \n\
+        -p --pipes     : thread num (used by test.) \n\
         -H -h --help   : show this help. \n\
 \n"); 
 }
@@ -40,7 +43,7 @@ int main(int argc, char** argv) {
     srand((int)time(0));
 
     int opt;
-    char* opt_string = "dS:L:hHf:M:o:c:s:t:bT:";
+    char* opt_string = "dS:L:hHf:M:o:c:s:t:bT:p:";
     static struct option long_options[] = {
         {"file", required_argument, NULL, 'f'},
         {"load", required_argument, NULL, 'L'},
@@ -53,6 +56,7 @@ int main(int argc, char** argv) {
         {"transform", required_argument, NULL, 't'},
         {"binary", required_argument, NULL, 'b'},
         {"test", required_argument, NULL, 'T'},
+        {"pipes", required_argument, NULL, 'p'},
         {"debug", required_argument, NULL, 'd'},
         {0, 0, 0, 0}
     };
@@ -67,6 +71,7 @@ int main(int argc, char** argv) {
     bool binary_mode = false;
     Config_t model_config;
     const char* config_section = NULL;
+    int thread_num = 5;
     while ( (opt=getopt_long(argc, argv, opt_string, long_options, NULL))!=-1 ) {
         switch (opt) {
             case 'd':
@@ -124,6 +129,11 @@ int main(int argc, char** argv) {
                 LOG_NOTICE("test data [%s]", test_file);
                 break;
 
+            case 'p':
+                thread_num = atoi(optarg);
+                LOG_NOTICE("global-pipes: %d", thread_num);
+                break;
+
             case 'h':
             case 'H':
                 show_help();
@@ -167,6 +177,10 @@ int main(int argc, char** argv) {
         return -1;
     }
 
+    bool test_and_train_is_same = false;
+    if (test_file && input_file && strcmp(test_file, input_file)==0) {
+        test_and_train_is_same = true;
+    }
 
     FlyReader_t* train_data_reader = NULL;
     FlyReader_t* test_data_reader  = NULL;
@@ -176,7 +190,11 @@ int main(int argc, char** argv) {
             ((BinaryFeatureReader_t*)train_data_reader)->stat();
         }
         if (test_file) {
-            test_data_reader = new BinaryFeatureReader_t(test_file);
+            if (test_and_train_is_same) {
+                test_data_reader = train_data_reader;
+            } else {
+                test_data_reader = new BinaryFeatureReader_t(test_file);
+            }
         }
 
     } else {
@@ -185,9 +203,27 @@ int main(int argc, char** argv) {
             train_data_reader->set(input_file);
         }
         if (test_file) {
-            test_data_reader = new FeatureReader_t();
-            test_data_reader->set(test_file);
+            if (test_and_train_is_same) {
+                test_data_reader = train_data_reader;
+            } else {
+                test_data_reader = new FeatureReader_t();
+                test_data_reader->set(test_file);
+            }
         }
+    }
+
+    // load model at first.
+    // which can make continuous-trainging.
+    if (model_load_file) {
+        LOG_NOTICE("Model load from [%s]", model_load_file);
+        FILE* model_file = fopen(model_load_file, "r");
+        if (!model_file) {
+            LOG_ERROR("Cannot open file [%s] to read model.", model_load_file);
+            return -1;
+        }
+        model->read_model(model_file);
+        fclose(model_file);
+        LOG_NOTICE("Model load completed.");
     }
 
     if (input_file) {
@@ -209,62 +245,19 @@ int main(int argc, char** argv) {
         fclose(model_file);
         LOG_NOTICE("Model save completed.");
     }
-    if (model_load_file) {
-        LOG_NOTICE("Model load from [%s]", model_load_file);
-        FILE* model_file = fopen(model_load_file, "r");
-        if (!model_file) {
-            LOG_ERROR("Cannot open file [%s] to read model.", model_load_file);
-            return -1;
-        }
-        model->read_model(model_file);
-        fclose(model_file);
-        LOG_NOTICE("Model load completed.");
-    }
  
     // simple test.
-    FlyReader_t *treader = NULL;
     if (test_data_reader != NULL) {
         LOG_NOTICE("Training over. Begin to test!");
-        treader = test_data_reader;
-        //treader->reset();
-        int c = 0;
-        Instance_t item;
-        FArray_t<ResultPair_t> res_list(5000000);
-        FILE* out_fd = NULL;
-        if (output_file) {
-            out_fd = fopen(output_file, "w");
-        }
-        Timer tm;
-        tm.begin();
-        while (treader->read(&item)) {
-            //item.write(stderr);
-            ResultPair_t ans;
-            ans.target = item.label;
-            ans.output = model->predict(item);
-            res_list.push_back(ans);
-
-            if (out_fd) {
-                fprintf(out_fd, "%f\t%f\n", ans.target, ans.output);
-            }
-            c++;
-        }
-        tm.end();
-        LOG_NOTICE("performance: %.3f sec, qps=%.2f", tm.cost_time(), c*1.0/tm.cost_time());
-        if (out_fd) {
-            fclose(out_fd);
+        if (test_and_train_is_same) {
+            test_data_reader->reset();
         }
 
-        ResultPair_t* res_buffer = res_list.buffer();
-        LOG_NOTICE("auc: %.6f", calc_auc(c, res_buffer));
-        LOG_NOTICE("logMLE: %.6f", calc_log_mle(c, res_buffer));
-        float rmse = calc_rmse(c, res_buffer);
-        LOG_NOTICE("rmse: %f, mse=%f", rmse, rmse*rmse);
-        LOG_NOTICE("confussion: %s", calc_confussion_matrix(c, res_buffer).str().c_str());
+        test(test_data_reader, model, thread_num);
 
-        int error = calc_error(c, res_buffer);
-        LOG_NOTICE("error: %d/%d (%.2f%%)", error, c, error*100.0/c);
-
-        delete test_data_reader;
+        if (!test_and_train_is_same) {
+            delete test_data_reader;
+        }
         test_data_reader = NULL;
     }
 
@@ -275,5 +268,82 @@ int main(int argc, char** argv) {
     delete model;
     return 0;
 }
+
+struct TestJob_t {
+    int job_id;
+    PCPool_t<Instance_t>* pool;
+    FlyReader_t* reader;
+    FArray_t<ResultPair_t> ans_list;
+    FlyModel_t* model;
+};
+
+void* thread_test(void* c) {
+    TestJob_t& job = *(TestJob_t*)c;
+    if (job.reader) {
+        LOG_NOTICE("thread[%d] : I am a reader.", job.job_id);
+        size_t c = 0;
+        while (1) {
+            Instance_t* cell = job.pool->begin_put();
+            if (!job.reader->read(cell)) {
+                job.pool->end_put(false);
+                break;
+            }
+            if (c % 2000000 == 0) {
+                LOG_NOTICE("complete %d puts.", c);
+            }
+            job.pool->end_put();
+            c ++;
+        }
+        LOG_NOTICE("reader: load over. count=%d", c);
+        job.pool->set_putting(false);
+    } else {
+        LOG_NOTICE("thread[%d] : I am a worker.", job.job_id);
+        job.ans_list.clear();
+        Instance_t item;
+        while (job.pool->get(&item)) {
+            float ans;
+            ans = job.model->predict(item);
+            job.ans_list.push_back(ResultPair_t(item.label, ans));
+        }
+        LOG_NOTICE("thread[%d] : over. %d processed.", job.job_id, job.ans_list.size());
+    }
+    return NULL;
+}
+
+void test(FlyReader_t* treader, FlyModel_t* model, int thread_num) {
+    // 1 reader + thread_num workers.
+    thread_num += 1;
+    TestJob_t* jobs = new TestJob_t[thread_num];
+    PCPool_t<Instance_t> pool(2000000);
+    for (int i=0; i<thread_num; ++i) {
+        jobs[i].pool = &pool;
+        jobs[i].job_id = i;
+        jobs[i].reader = NULL;
+        jobs[i].model = model;
+    }
+    jobs[0].reader = treader;
+
+    multi_thread_jobs(thread_test, jobs, thread_num, thread_num);
+    LOG_NOTICE("thread work is over.");
+    FArray_t<ResultPair_t> total_list;
+    for (int i=0; i<thread_num; ++i) {
+        for (size_t j=0; j<jobs[i].ans_list.size(); ++j) {
+            total_list.push_back( jobs[i].ans_list[j] );
+        }
+    }
+    LOG_NOTICE("merge ans list over.");
+
+    ResultPair_t* res_buffer = total_list.buffer();
+    size_t c = total_list.size();
+    LOG_NOTICE("auc: %.6f", calc_auc(c, res_buffer));
+    LOG_NOTICE("logMLE: %.6f", calc_log_mle(c, res_buffer));
+    float rmse = calc_rmse(c, res_buffer);
+    LOG_NOTICE("rmse: %f, mse=%f", rmse, rmse*rmse);
+    LOG_NOTICE("confussion: %s", calc_confussion_matrix(c, res_buffer).str().c_str());
+
+    int error = calc_error(c, res_buffer);
+    LOG_NOTICE("error: %d/%d (%.2f%%)", error, c, error*100.0/c);
+}
+
 
 /* vim: set expandtab ts=4 sw=4 sts=4 tw=100: */

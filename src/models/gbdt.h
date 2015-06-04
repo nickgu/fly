@@ -345,17 +345,30 @@ class GBDT_t
             _predict_tree_cut = N;
         }
 
+        int get_predict_tree_cut() const {
+            if (_predict_tree_cut == -1) {
+                return _tree_count;
+            }
+            return _predict_tree_cut;
+        }
+
         virtual float predict(const Instance_t& ins) const {
             return predict_and_get_leaves(ins, NULL, NULL);
         }
 
         virtual float predict_and_get_leaves(const Instance_t& ins, 
-                vector<int>* output_leaf_id_in_each_tree,
-                vector<float>* output_mean) const 
+                int* output_leaf_id_in_each_tree,
+                float* output_mean,
+                float* buffer=NULL) const 
         {
             float ret = 0.0f;
             // bad performance.
             float *predict_buffer = new float [_dim_count];
+            if (buffer) {
+                predict_buffer = buffer;
+            } else {
+                predict_buffer = new float[_dim_count];
+            }
 
             memset(predict_buffer, 0, sizeof(float) * _dim_count);
             for (size_t f=0; f<ins.features.size(); ++f) {
@@ -365,19 +378,12 @@ class GBDT_t
             }
 
             SmallTreeNode_t** end_tree = _compact_trees + _tree_count;
-            if (output_leaf_id_in_each_tree!=NULL) {
-                output_leaf_id_in_each_tree->clear();
-            }
-            if (output_mean) {
-                output_mean->clear();
-            }
 
             int tc = 0;
             for (SmallTreeNode_t** tree=_compact_trees; tree<end_tree; ++tree) {
                 if (_predict_tree_cut>=0 && tc>=_predict_tree_cut) {
                     break;
                 }
-                tc++;
 
                 int nid = 0;
                 while (1) {
@@ -392,14 +398,18 @@ class GBDT_t
                     }
                 }
                 if (output_leaf_id_in_each_tree!=NULL) {
-                    output_leaf_id_in_each_tree->push_back(nid);
+                    output_leaf_id_in_each_tree[tc] = nid;
                     if (output_mean) {
-                        output_mean->push_back(_mean[tree - _compact_trees][nid]);
+                        output_mean[tc] = _mean[tree - _compact_trees][nid];
                     }
                 }
                 ret += _mean[tree - _compact_trees][nid];
+
+                tc++;
             }
-            delete [] predict_buffer;
+            if (!buffer) {
+                delete [] predict_buffer;
+            }
             return ret;
         }
 

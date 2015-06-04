@@ -97,15 +97,17 @@ class FArray_t {
         }
 
         FArray_t& operator = (const FArray_t& o) {
-            _release();
-            _bnum = o._bnum;
             _num = o._num;
             _extend_num = o._extend_num;
-            if (_bnum > 0) {
+
+            if (_bnum < o._bnum) {
+                if (_bnum>0) {
+                    free(_l);
+                }
+                _bnum = o._bnum;
                 _l = (T*)malloc(_bnum * sizeof(T));
-                //LOG_NOTICE("m: %p [%u]", _l, _bnum);
-                memcpy(_l, o._l, _num * sizeof(T));
             }
+            memcpy(_l, o._l, _num * sizeof(T));
             return *this;
         }
 
@@ -196,21 +198,21 @@ class ThreadData_t {
     public:
         ThreadData_t(PtrType_t a) {
             _data = a;
-            pthread_mutex_init(&_lock, 0);
+            pthread_spin_init(&_lock, 0);
         }
 
         PtrType_t borrow() {
-            pthread_mutex_lock(&_lock);
+            pthread_spin_lock(&_lock);
             return _data;
         }
 
         void give_back() {
-            pthread_mutex_unlock(&_lock);
+            pthread_spin_unlock(&_lock);
         }
 
     private:
         PtrType_t _data;
-        pthread_mutex_t _lock;
+        pthread_spinlock_t _lock;
 };
 
 /*

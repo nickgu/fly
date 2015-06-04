@@ -35,17 +35,19 @@ static PyObject* tree_features(PyObject *self, PyObject *args)
     }
     ins.parse_item(line);
 
-    std::vector<int> leaves;
     GBDT_t* p_model = (GBDT_t*)handle;
 
-    p_model->predict_and_get_leaves(ins, &leaves, NULL);
+    int predict_tree_count = p_model->get_predict_tree_cut();
+    int *leaves = new int[predict_tree_count];
+    p_model->predict_and_get_leaves(ins, leaves, NULL);
 
-    PyObject* ans_list = PyList_New(leaves.size());
+    PyObject* ans_list = PyList_New(predict_tree_count);
     int tree_node_count = p_model->tree_node_count();;
-    for (size_t i=0; i<leaves.size(); ++i) {
+    for (int i=0; i<predict_tree_count; ++i) {
         int s = i*tree_node_count + leaves[i];
         PyList_SET_ITEM(ans_list, i, PyInt_FromLong(s));
     }
+    delete [] leaves;
     return ans_list;
 }
 
