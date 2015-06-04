@@ -564,6 +564,9 @@ class GBDT_t
 
                     for (int offset=0; offset<epoch_count; ++offset) {
                         int fid = offset + feature_begin;
+                        if (fid >= _dim_count) {
+                            break;
+                        }
 
                         LOG_NOTICE("sort dim : %d (offset=%d)", fid, offset);
                         sort(ptr[offset], ptr[offset]+_item_count);
