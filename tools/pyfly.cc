@@ -4,9 +4,10 @@
 #include <cstdio>
 
 #include "gbdt.h" 
+#include "logit.h"
 
 
-static PyObject* predict(PyObject *self, PyObject *args)
+static PyObject* predict_str(PyObject *self, PyObject *args)
 {
     Instance_t ins;
     long int handle;
@@ -17,11 +18,41 @@ static PyObject* predict(PyObject *self, PyObject *args)
         return Py_BuildValue("l", -2);
     }
     ins.parse_item(line);
-    GBDT_t* p_model = (GBDT_t*)handle;
+    FlyModel_t* p_model = (FlyModel_t*)handle;
     float pres = p_model->predict(ins);
     return Py_BuildValue("f", pres);
-
 }
+
+static PyObject* predict(PyObject *self, PyObject *args)
+{
+    Instance_t ins;
+    long int handle;
+    PyObject* feature_list;
+    int res = PyArg_ParseTuple(args, "lO", &handle, &feature_list);
+    if (!res) {
+        fprintf(stderr, "predict parse input failed!\n");
+        return Py_BuildValue("l", -2);
+    }
+       
+    int feature_size = PyList_Size(feature_list);
+    LOG_NOTICE("features_num=%d", feature_size);
+    if (feature_size<0) {
+        return Py_BuildValue("l", -1);
+    }
+
+    for (size_t i=0; i<feature_size; ++i) {
+        IndValue_t indvalue;
+        PyObject* tup = PyList_GET_ITEM(feature_list, i);
+        indvalue.index = PyLong_AsLong(PyTuple_GET_ITEM(tup, 0));
+        indvalue.value = PyFloat_AsDouble(PyTuple_GET_ITEM(tup, 1));
+        ins.features.push_back(indvalue);
+    }
+
+    FlyModel_t* p_model = (FlyModel_t*)handle;
+    float pres = p_model->predict(ins);
+    return Py_BuildValue("f", pres);
+}
+
 
 static PyObject* tree_features(PyObject *self, PyObject *args)
 {
@@ -51,7 +82,7 @@ static PyObject* tree_features(PyObject *self, PyObject *args)
     return ans_list;
 }
 
-static PyObject* load_model_cutted(PyObject *self, PyObject *args)
+static PyObject* load_gbdt_model_cutted(PyObject *self, PyObject *args)
 {
     char* model_file = NULL;
     int tree_cut;
@@ -62,6 +93,7 @@ static PyObject* load_model_cutted(PyObject *self, PyObject *args)
     }
     Config_t nil_config;
     GBDT_t* p_model = new GBDT_t(nil_config, "");
+    LOG_NOTICE("Try to load model file : [%s]", model_file);
     FILE* fstream = fopen(model_file, "r");
     p_model->read_model(fstream);
     fclose(fstream);
@@ -72,7 +104,7 @@ static PyObject* load_model_cutted(PyObject *self, PyObject *args)
     return Py_BuildValue("l",handle);
 }
 
-static PyObject* load_model(PyObject *self, PyObject *args)
+static PyObject* load_gbdt_model(PyObject *self, PyObject *args)
 {
     char* model_file = NULL;
     int res = PyArg_ParseTuple(args,"s", &model_file);
@@ -83,12 +115,34 @@ static PyObject* load_model(PyObject *self, PyObject *args)
     Config_t nil_config;
     FlyModel_t* p_model = new GBDT_t(nil_config, "");
 
+    LOG_NOTICE("Try to load model file : [%s]", model_file);
     FILE* fstream = fopen(model_file, "r");
     p_model->read_model(fstream);
     fclose(fstream);
     long int handle = (long int)p_model;
     return Py_BuildValue("l",handle);
 }
+
+static PyObject* load_lr_model(PyObject *self, PyObject *args)
+{
+    char* model_file = NULL;
+    int res = PyArg_ParseTuple(args,"s", &model_file);
+    if (!res) {
+        fprintf(stderr, "parse args failed!\n");
+        return Py_BuildValue("l", -1);
+    }
+    Config_t nil_config;
+    LogisticRegression_t* p_model = new LogisticRegression_t(nil_config, "");
+
+    LOG_NOTICE("Try to load model file : [%s]", model_file);
+    FILE* fstream = fopen(model_file, "r");
+    p_model->read_model(fstream);
+    fclose(fstream);
+    long int handle = (long int)p_model;
+    return Py_BuildValue("l",handle);
+}
+
+
 
 static PyObject* release(PyObject *self, PyObject *args)
 {
@@ -102,17 +156,18 @@ static PyObject* release(PyObject *self, PyObject *args)
     return Py_BuildValue("l", 1);
 }
 
-
-static PyMethodDef gbdtMethods[]={
-    {"load",load_model,METH_VARARGS},
-    {"load_cut",load_model_cutted,METH_VARARGS},
-    {"predict",predict,METH_VARARGS},
+static PyMethodDef PyFlyMethods[]={
+    {"load_gbdt",load_gbdt_model,METH_VARARGS},
+    {"load_gbdt_cut",load_gbdt_model_cutted,METH_VARARGS},
+    {"load_lr", load_lr_model, METH_VARARGS},
+    {"predict_str",predict_str, METH_VARARGS},
+    {"predict", predict, METH_VARARGS},
     {"tree_features",tree_features,METH_VARARGS},
     {"release_trees",release,METH_VARARGS},
     {NULL,NULL}
 };
 
-PyMODINIT_FUNC initGBDT()
+PyMODINIT_FUNC initPyFly()
 {
-    Py_InitModule3("GBDT",gbdtMethods,"test_model");
+    Py_InitModule3("PyFly", PyFlyMethods, "Fly's Python API.");
 }

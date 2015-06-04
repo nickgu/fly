@@ -5,7 +5,7 @@ COMPILER = g++
 CPPFLAGS =  -D__VERSION_ID__="\"$(VERSION)\"" -g -Wall -O3 -fPIC  -pipe -D_REENTRANT -DLINUX -Wall
 DEBUG_CPPFLAGS =  -D__VERSION_ID__="\"$(VERSION)\"" -g -Wall -O0 -fPIC  -pipe -D_REENTRANT -DLINUX -Wall
 
-TARGET=auc test_gbdt binary_feature_less GBDT.so
+TARGET=auc test_gbdt binary_feature_less PyFly.so
 
 INCLUDES= -I../src/include\
 		  -I../src/models
@@ -40,7 +40,7 @@ auc: auc.cc
 	@echo 'MAKE: AUC'
 	$(COMPILER) $^ -o $@ $(LIBS) $(CPPFLAGS) $(INCLUDES) 
 
-GBDT.so: pyfly.cc
+PyFly.so: pyfly.cc
 	$(COMPILER) -fpic $^ -shared -o $@ $(INCLUDES) $(PYTHON27_INCLUDE) $(LIBS) $(CPPFLAGS) 
 
 clean:
