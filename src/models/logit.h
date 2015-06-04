@@ -26,6 +26,12 @@ enum LearnRateAdjustMethod_t {
     Constant,
 };
 
+enum RegularizationMethod_t {
+    RegNone = 0,
+    RegL1,
+    RegL2
+};
+
 class LogitSolver:
     public Updatable_t
 {
@@ -36,7 +42,9 @@ class LogitSolver:
                     float learn_rate,
                     LearnRateAdjustMethod_t decay_method,
                     const Param_t& decay,
-                    bool preuniform);
+                    bool preuniform,
+                    RegularizationMethod_t reg_method,
+                    float reg_weight);
 
         ~LogitSolver();
 
@@ -53,6 +61,9 @@ class LogitSolver:
 
         // pre-uniform.
         bool _pre_uniform;
+
+        RegularizationMethod_t _reg_method;
+        float   _reg_weight;
 };
 
 LogitSolver::~LogitSolver() {
@@ -64,14 +75,18 @@ LogitSolver::LogitSolver(size_t theta_num,
                 float learn_rate,
                 LearnRateAdjustMethod_t decay_method,
                 const Param_t& decay,
-                bool preuniform):
+                bool preuniform,
+                RegularizationMethod_t reg_method,
+                float reg_weight):
     _theta(cur_param),
     _theta_num(theta_num),
     _uniform(uniformer),
     _learn_rate(learn_rate),
     _decay_method(decay_method),
     _decay(decay),
-    _pre_uniform(preuniform)
+    _pre_uniform(preuniform),
+    _reg_method(reg_method),
+    _reg_weight(reg_weight)
 {
 }    
 
@@ -84,7 +99,6 @@ float LogitSolver::update(Instance_t& item) {
     float p = sigmoid( sparse_dot(_theta, item.features) );
     float desc = (item.label - p);
     float reg = 0;
-    float reg_weight = 0.05;
 
     if (_decay_method == FeatureDecay || _decay_method == Decay) {
         _decay.b += 1.0;
@@ -93,7 +107,13 @@ float LogitSolver::update(Instance_t& item) {
         _decay.b += desc * desc;
         cur_rate = _learn_rate / (1.0 + sqrt(_decay.b));
     }
-    reg = _theta.b * -reg_weight;
+    if (_reg_method == RegNone) {
+        reg = 0;
+    } else if (_reg_method == RegL1) {
+        reg = - sgn(_theta.b) * _reg_weight;
+    } else if (_reg_method == RegL2) {
+        reg = -0.5 * (_theta.b * _reg_weight);
+    }
     _theta.b = _theta.b + (desc + reg) * cur_rate;
     for (size_t i=0; i<item.features.size(); ++i) {
         int index = item.features[i].index;
@@ -112,7 +132,14 @@ float LogitSolver::update(Instance_t& item) {
             cur_rate = _learn_rate / (1.0 + sqrt(_decay.w[index]));
         }
 
-        reg = _theta.w[index] * -reg_weight;
+        if (_reg_method == RegNone) {
+            reg = 0;
+        } else if (_reg_method == RegL1) {
+            reg = - sgn(_theta.w[index]) * _reg_weight;
+        } else if (_reg_method == RegL2) {
+            reg = -0.5 * (_theta.w[index] * _reg_weight);
+        }
+
         _theta.w[index] += (gradient + reg) * cur_rate;
     }
 
@@ -180,6 +207,7 @@ class LogisticRegression_t
                 LOG_NOTICE("use_momentum:true. momentum_ratio:%f", _momentum_ratio);
             }
 
+            // load learning rate decay method.
             string method;
             method = conf.conf_str_default(section, "learn_rate_adjust_method", "feature_decay");
             const char* method_str[] = {"FeatureDecay", "GradientFeatureDecay", "Decay", "Constant"};
@@ -196,6 +224,24 @@ class LogisticRegression_t
                 _adjust_method = GradientFeatureDecay;
             }
             LOG_NOTICE("LEARNING_RATE_ADJUST_METHOD : %s", method_str[_adjust_method]);
+
+            // load regularization method.
+            method = conf.conf_str_default(section, "regularization_method", "none");
+            const char* reg_method_str[] = {"none", "l1", "l2"};
+            if (method == "none") {
+                _reg_method = RegNone;
+            } else if (method == "l1") {
+                _reg_method = RegL1;
+            } else if (method == "l2") {
+                _reg_method = RegL2;
+            } else {
+                LOG_ERROR("Illegal REGULARIZATION_METHOD : %s", method.c_str());
+                _reg_method = RegNone;
+            }
+            LOG_NOTICE("REGULARIZATION_METHOD: %s", reg_method_str[_reg_method]);
+
+            _reg_weight = conf.conf_float_default(section, "regularization_weight", 0.02);
+            LOG_NOTICE("regularization_weight: %f", _reg_weight);
 
             _early_stop_N = conf.conf_int_default(section, "early_stop_n", -1);
             LOG_NOTICE("early_stop_N: %d", _early_stop_N);
@@ -355,6 +401,9 @@ class LogisticRegression_t
         // dump model on training process.
         string  _middle_dump_dir;
         int     _middle_dump_interval;
+
+        RegularizationMethod_t  _reg_method;
+        float                   _reg_weight;
 
         float predict_no_uniform(const Instance_t& uniformed_item) const {
             return sigmoid( sparse_dot(_theta, uniformed_item.features) );
@@ -523,7 +572,9 @@ class LogisticRegression_t
                     _learn_rate,
                     _adjust_method,
                     _decay,
-                    _pre_uniform);
+                    _pre_uniform,
+                    _reg_method,
+                    _reg_weight);
             return solver;
         }
 

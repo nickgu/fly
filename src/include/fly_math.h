@@ -127,6 +127,11 @@ struct Param_t {
     }
 };
 
+template<typename T>
+float sgn(T x) {
+    return x>=0?1.0:-1.;
+}
+
 /**
  * Generate a random number between [-0.5, +0.5]
  */

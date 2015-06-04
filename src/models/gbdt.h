@@ -275,6 +275,9 @@ class GBDT_t
             _output_feature_weight = config.conf_int_default(section, "output_feature_weight", 0);
             LOG_NOTICE("output_feature_weight=%d", _output_feature_weight);
 
+            _preprocess_maximum_memory = config.conf_int_default(section, "preprocess_maximum_memory", 60);
+            LOG_NOTICE("_preprocess_maximum_memory=%d(G)", _preprocess_maximum_memory);
+
             string s = config.conf_str_default(section, "feature_mask", "");
             vector<string> vs;
             split((char*)s.c_str(), ",", vs);
@@ -505,69 +508,98 @@ class GBDT_t
                 fprintf(stderr, "\n");
 
             } else { // save to _feature_output_dir
-                FeatureInfo_t **ptr = new FeatureInfo_t*[_dim_count];
-                for (int i=0; i<_dim_count; ++i) {
-                    ptr[i] = new FeatureInfo_t[_item_count];
+                
+                size_t preprocess_memory_each_feature = sizeof(FeatureInfo_t) * _item_count;
+                size_t maximum_memory = _preprocess_maximum_memory * (1<<30);
+                int epoch_count = (maximum_memory - 2*sizeof(SortedIndex_t)*_item_count) / preprocess_memory_each_feature;
+                if (epoch_count > _dim_count) {
+                    epoch_count = _dim_count;
                 }
-                SortedIndex_t *idx_list = new SortedIndex_t[_item_count];
-
-                Instance_t item;
-                size_t item_id = 0;
-                int cur_per = 0;
-                while (reader->read(&item/*, true*/)) {
-                    _labels[item_id].residual = item.label;
-                    // some feature may be missing.
-                    for (int i=0; i<_dim_count; ++i) {
-                        ptr[i][item_id].index = item_id;
-                    }
-                    for (size_t i=0; i<item.features.size(); ++i) {
-                        const IndValue_t& f = item.features[i];
-                        ptr[f.index][item_id].value = f.value;
-                    }
-                    item_id ++;
-
-                    int per = reader->percentage();
-                    if (per > cur_per) {
-                        cur_per = per;
-                        fprintf(stderr, "%c%4d%% loaded..", 13, cur_per);
-                    }
-                }
-                fprintf(stderr, "\n");
+                LOG_NOTICE("Preprocess: MemoryLimit=%dg EachFeatureRequired=%.2fg EpochCount=%d",
+                        _preprocess_maximum_memory,
+                        preprocess_memory_each_feature * 1. / (1<<30),
+                        epoch_count);
 
                 system("rm -rf gbdt_temp");
                 system("mkdir gbdt_temp");
 
-                for (int fid=0; fid<_dim_count; ++fid) {
-                    LOG_NOTICE("sort dim : %d", fid);
-                    sort(ptr[fid], ptr[fid]+_item_count);
-                    LOG_NOTICE("sort dim %d over.", fid);
+                FeatureInfo_t **ptr = new FeatureInfo_t*[epoch_count];
+                for (int i=0; i<epoch_count; ++i) {
+                    ptr[i] = new FeatureInfo_t[_item_count];
+                }
+                SortedIndex_t *idx_list = new SortedIndex_t[_item_count];
 
-                    for (size_t i=0; i<_item_count; ++i) {
-                        idx_list[i].index = ptr[fid][i].index;
-                        if (i>0 && ptr[fid][i].value == ptr[fid][i-1].value) {
-                            idx_list[i].same = 1;
-                        } else {
-                            idx_list[i].same = 0;
+                for (int feature_begin=0; feature_begin<_dim_count; feature_begin += epoch_count) {
+                    LOG_NOTICE("Preproces epoch : feature_range=[%d, %d)", feature_begin, feature_begin + epoch_count );
+                    Instance_t item;
+                    size_t item_id = 0;
+                    int cur_per = 0;
+                    reader->reset();
+                    while (reader->read(&item/*, true*/)) {
+                        _labels[item_id].residual = item.label;
+
+                        // some feature may be missing.
+                        // default value set to zero.
+                        for (int i=0; i<epoch_count; ++i) {
+                            ptr[i][item_id].index = item_id;
+                            ptr[i][item_id].value = 0;
+                        }
+                        for (size_t i=0; i<item.features.size(); ++i) {
+                            const IndValue_t& f = item.features[i];
+                            int f_offset = f.index - feature_begin;
+                            if (f_offset<0 || f_offset>=epoch_count) {
+                                continue;
+                            }
+                            ptr[f_offset][item_id].value = f.value;
+                        }
+                        item_id ++;
+
+                        int per = reader->percentage();
+                        if (per > cur_per) {
+                            cur_per = per;
+                            fprintf(stderr, "%c%4d%% loaded..", 13, cur_per);
                         }
                     }
+                    fprintf(stderr, "\n");
 
-                    char buf[32];
-                    snprintf(buf, sizeof(buf), "gbdt_temp/feature.%d", fid);
-                    FILE* fout = fopen(buf, "wb");
-                    if (!fout) {
-                        LOG_ERROR("open temp directory to save field information failed! [%s]", buf);
-                        exit(-1);
+                    for (int offset=0; offset<epoch_count; ++offset) {
+                        int fid = offset + feature_begin;
+
+                        LOG_NOTICE("sort dim : %d (offset=%d)", fid, offset);
+                        sort(ptr[offset], ptr[offset]+_item_count);
+                        LOG_NOTICE("sort dim %d over.", fid);
+
+                        // set is_same flag.
+                        // if set, continuous item has same value(Cannot be splited)
+                        for (size_t i=0; i<_item_count; ++i) {
+                            idx_list[i].index = ptr[offset][i].index;
+                            if (i>0 && ptr[offset][i].value == ptr[offset][i-1].value) {
+                                idx_list[i].same = 1;
+                            } else {
+                                idx_list[i].same = 0;
+                            }
+                        }
+                        LOG_NOTICE("check same info [%d] over.", fid);
+
+                        char buf[32];
+                        snprintf(buf, sizeof(buf), "gbdt_temp/feature.%d", fid);
+                        FILE* fout = fopen(buf, "wb");
+                        if (!fout) {
+                            LOG_ERROR("open temp directory to save field information failed! [%s]", buf);
+                            exit(-1);
+                        }
+                        fwrite(idx_list, _item_count, sizeof(SortedIndex_t), fout);
+                        fclose(fout);
+                        _ffd[fid] = fopen(buf, "rb");
+
+                        LOG_NOTICE("write feature file over [%s]", buf);
                     }
-                    fwrite(idx_list, _item_count, sizeof(SortedIndex_t), fout);
-                    fclose(fout);
-                    _ffd[fid] = fopen(buf, "rb");
 
-                    LOG_NOTICE("write feature file over [%s]", buf);
                 }
 
                 // free memory.
                 delete [] idx_list;
-                for (int i=0; i<_dim_count; ++i) {
+                for (int i=0; i<epoch_count; ++i) {
                     delete [] ptr[i];
                 }
                 delete [] ptr;
@@ -867,7 +899,7 @@ class GBDT_t
 
         uint32_t  _item_count;
         int     _dim_count;
-        size_t  _maximum_memory;
+        size_t  _preprocess_maximum_memory;
 
         SmallTreeNode_t** _compact_trees;
         float**         _mean;

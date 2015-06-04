@@ -21,6 +21,9 @@
 #include <cstring>
 using namespace std;
 
+#include <linux/unistd.h>
+#include <linux/kernel.h>
+
 #ifndef LOG_DEBUG
 #define LOG_DEBUG(format, ...) {if (__hidden::is_debug_on()) fprintf(stderr, "DEBUG: " format "\n", ##__VA_ARGS__);}
 #endif 
@@ -32,6 +35,13 @@ using namespace std;
 #ifndef LOG_ERROR
 #define LOG_ERROR(format, ...) {fprintf(stderr, " ERROR: " format "\n", ##__VA_ARGS__);}
 #endif
+
+_syscall1(int, sysinfo, struct sysinfo*, info);
+size_t cur_memory() {
+    struct sysinfo s_info;
+    sysinfo(&s_info);
+    return s_info.mem_unit;
+}
 
 namespace __hidden {
     static bool __g_debug_is_on__ = false;
