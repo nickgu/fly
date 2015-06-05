@@ -35,12 +35,12 @@ static PyObject* predict(PyObject *self, PyObject *args)
     }
        
     int feature_size = PyList_Size(feature_list);
-    LOG_NOTICE("features_num=%d", feature_size);
+    //LOG_NOTICE("features_num=%d", feature_size);
     if (feature_size<0) {
         return Py_BuildValue("l", -1);
     }
 
-    for (size_t i=0; i<feature_size; ++i) {
+    for (int i=0; i<feature_size; ++i) {
         IndValue_t indvalue;
         PyObject* tup = PyList_GET_ITEM(feature_list, i);
         indvalue.index = PyLong_AsLong(PyTuple_GET_ITEM(tup, 0));
@@ -58,13 +58,26 @@ static PyObject* tree_features(PyObject *self, PyObject *args)
 {
     Instance_t ins;
     long int handle;
-    char* line = NULL;
-    int res = PyArg_ParseTuple(args, "ls", &handle, &line);
+    PyObject* feature_list;
+    int res = PyArg_ParseTuple(args, "lO", &handle, &feature_list);
     if (!res) {
         fprintf(stderr, "predict parse input failed!\n");
         return Py_BuildValue("l", -2);
     }
-    ins.parse_item(line);
+       
+    int feature_size = PyList_Size(feature_list);
+    //LOG_NOTICE("features_num=%d", feature_size);
+    if (feature_size<0) {
+        return Py_BuildValue("l", -1);
+    }
+
+    for (int i=0; i<feature_size; ++i) {
+        IndValue_t indvalue;
+        PyObject* tup = PyList_GET_ITEM(feature_list, i);
+        indvalue.index = PyLong_AsLong(PyTuple_GET_ITEM(tup, 0));
+        indvalue.value = PyFloat_AsDouble(PyTuple_GET_ITEM(tup, 1));
+        ins.features.push_back(indvalue);
+    }
 
     GBDT_t* p_model = (GBDT_t*)handle;
 
@@ -79,7 +92,7 @@ static PyObject* tree_features(PyObject *self, PyObject *args)
         PyList_SET_ITEM(ans_list, i, PyInt_FromLong(s));
     }
     delete [] leaves;
-    return ans_list;
+    return Py_BuildValue("O", ans_list);
 }
 
 static PyObject* load_gbdt_model_cutted(PyObject *self, PyObject *args)

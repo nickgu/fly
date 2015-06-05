@@ -19,6 +19,12 @@
 #include "iter.h"
 #include "uniform.h"
 
+enum UniformMethod_t {
+    NoUniform = 0,
+    PreUniform,
+    OnlineUniform
+};
+
 enum LearnRateAdjustMethod_t {
     FeatureDecay = 0,
     GradientFeatureDecay,
@@ -38,11 +44,11 @@ class LogitSolver:
     public:
         LogitSolver(size_t theta_num, 
                     const Param_t& cur_param, 
+                    UniformMethod_t uniform_method,
                     MeanStdvar_Uniform* uniformer,
                     float learn_rate,
                     LearnRateAdjustMethod_t decay_method,
                     const Param_t& decay,
-                    bool preuniform,
                     RegularizationMethod_t reg_method,
                     float reg_weight);
 
@@ -53,14 +59,13 @@ class LogitSolver:
     public:
         Param_t _theta;
         int     _theta_num;
+
+        UniformMethod_t     _uniform_method;
         MeanStdvar_Uniform* _uniform;
 
         float   _learn_rate;
         LearnRateAdjustMethod_t _decay_method;
         Param_t _decay;
-
-        // pre-uniform.
-        bool _pre_uniform;
 
         RegularizationMethod_t _reg_method;
         float   _reg_weight;
@@ -71,33 +76,37 @@ LogitSolver::~LogitSolver() {
 
 LogitSolver::LogitSolver(size_t theta_num, 
                 const Param_t& cur_param, 
+                UniformMethod_t uniform_method,
                 MeanStdvar_Uniform* uniformer,
                 float learn_rate,
                 LearnRateAdjustMethod_t decay_method,
                 const Param_t& decay,
-                bool preuniform,
                 RegularizationMethod_t reg_method,
                 float reg_weight):
     _theta(cur_param),
     _theta_num(theta_num),
+    _uniform_method(uniform_method),
     _uniform(uniformer),
     _learn_rate(learn_rate),
     _decay_method(decay_method),
     _decay(decay),
-    _pre_uniform(preuniform),
     _reg_method(reg_method),
     _reg_weight(reg_weight)
 {
 }    
 
 float LogitSolver::update(Instance_t& item) {
-    if (!_pre_uniform) {
+    if (_uniform_method == OnlineUniform) {
         _uniform->self_uniform(&item);
     }
 
     float cur_rate = _learn_rate;
     float p = sigmoid( sparse_dot(_theta, item.features) );
     float desc = (item.label - p);
+    
+    // desc@ MSE-loss:
+    //desc *= (1-p) * p;
+
     float reg = 0;
 
     if (_decay_method == FeatureDecay || _decay_method == Decay) {
@@ -144,7 +153,10 @@ float LogitSolver::update(Instance_t& item) {
     }
 
     float loss = 0.0;
-    loss = 0.5 * (item.label - p) * (item.label - p);
+    // Loss@MSE
+    //loss = 0.5 * (item.label - p) * (item.label - p);
+    // Loss@Log
+    loss = -(item.label * safe_log(p) + (1-item.label) * safe_log(1-p));
     return loss;
 }
 
@@ -246,8 +258,19 @@ class LogisticRegression_t
             _early_stop_N = conf.conf_int_default(section, "early_stop_n", -1);
             LOG_NOTICE("early_stop_N: %d", _early_stop_N);
 
-            _pre_uniform = conf.conf_int_default(section, "preuniform", 0);
-            LOG_NOTICE("pre-uniform: %d", _pre_uniform);
+            method = conf.conf_str_default(section, "uniform_method", "pre");
+            if (method == "none") {
+                _uniform_method = NoUniform;
+            } else if (method == "pre") {
+                _uniform_method = PreUniform;
+            } else if (method == "online") {
+                _uniform_method = OnlineUniform;
+            } else {
+                LOG_NOTICE("Illegal uniform method [%s] given", method.c_str());
+                _uniform_method = PreUniform;
+            }
+            const char* uniform_method_str[] = {"NoUniform", "PreUniform", "OnlineUniform"};
+            LOG_NOTICE("uniform method: %s", uniform_method_str[_uniform_method]);
 
             _min_loss_diff = conf.conf_float_default(section, "min_loss_diff", 1e-6);
             LOG_NOTICE("min_loss_diff=%f", _min_loss_diff);
@@ -293,8 +316,10 @@ class LogisticRegression_t
             fscanf(stream, "%d\t%f\n", &_theta_num, &_theta.b);
             _theta.set(_theta_num);
             for (int i=0; i<_theta_num; ++i) {
-                int tmp;
-                fscanf(stream, "%d:%f\n", &tmp, _theta.w+i);
+                int ind;
+                float value;
+                fscanf(stream, "%d:%f\n", &ind, &value);
+                _theta.w[ind] = value;
             }
             _continuous_training = true;
         }
@@ -315,10 +340,13 @@ class LogisticRegression_t
                 }
                 _theta.b = random_05();
 
-                LOG_NOTICE("Begin to stat uniform infomation.");
-                _uniform.stat(reader);
-                LOG_NOTICE("Stat over.");
-
+                if (_uniform_method != NoUniform) {
+                    LOG_NOTICE("Begin to stat uniform infomation.");
+                    _uniform.stat(reader);
+                    LOG_NOTICE("Stat over.");
+                } else {
+                    LOG_NOTICE("Skip uniform!");
+                }
             } 
 
             // init theta decay.
@@ -326,7 +354,7 @@ class LogisticRegression_t
 
             // preprocess:
             //   - uniform.
-            if (_pre_uniform) {
+            if (_uniform_method == PreUniform) {
                 LOG_NOTICE("Begin to pre-uniform.");
                 int thread_num = 11;
                 UniformerJob_t jobs[thread_num];
@@ -366,6 +394,8 @@ class LogisticRegression_t
         bool    _continuous_training;
         Param_t _theta;
         int     _theta_num;
+
+        UniformMethod_t    _uniform_method;
         MeanStdvar_Uniform _uniform;
 
         Param_t _best_theta;
@@ -389,8 +419,6 @@ class LogisticRegression_t
         int     _shrink_limit;
         int     _shrink_times;
 
-        // pre-uniform.
-        bool _pre_uniform;
 
         // profile timer.
         Timer  _predict_tm;
@@ -568,11 +596,11 @@ class LogisticRegression_t
             LogitSolver* solver = new LogitSolver(
                     _theta_num, 
                     _theta,
+                    _uniform_method,
                     &_uniform,
                     _learn_rate,
                     _adjust_method,
                     _decay,
-                    _pre_uniform,
                     _reg_method,
                     _reg_weight);
             return solver;

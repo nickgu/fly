@@ -37,10 +37,10 @@ using namespace std;
 #endif
 
 _syscall1(int, sysinfo, struct sysinfo*, info);
-size_t cur_memory() {
+size_t remain_memory() {
     struct sysinfo s_info;
     sysinfo(&s_info);
-    return s_info.mem_unit;
+    return s_info.freeram;
 }
 
 namespace __hidden {
