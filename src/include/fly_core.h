@@ -46,28 +46,49 @@ struct Instance_t {
         fprintf(stream, "\n");
     }
 
-    void parse_item(char *line) {
-        label = atof(line);
+    bool parse_item(char *line) {
+        char* end_ptr;
+        label = strtod(line, &end_ptr);
+        if (end_ptr == line) {
+            LOG_ERROR("parse_item() failed: label_parse: [%s]", end_ptr);
+            return false;
+        }
         features.clear();
 
         size_t begin = 0;
         IndValue_t iv;
         iv.index = -1;
+        bool index_illegal = false;
         for (size_t i=0; line[i]; ++i) {
             if (line[i] == ':') {
-                iv.index = atoi(line + begin);
-                begin = i+1;
-            }
-            if (line[i] == ' ' || line[i] == '\t' || line[i]=='\n' || line[i]=='\r') {
-                iv.value = atof(line + begin);
-                if (iv.index >= 0) {
-                    features.push_back(iv);
+                iv.index = strtol(line + begin, &end_ptr, 10);
+                if (end_ptr == line+begin) {
+                    LOG_ERROR("parse_item() failed: index_parse: [%s]", line+begin);
+                    return false;
                 }
 
+                begin = i+1;
+                index_illegal = true;
+            }
+            if (line[i] == ' ' || line[i] == '\t' || line[i]=='\n' || line[i]=='\r') {
+                if (!index_illegal) {
+                    begin = i + 1;
+                    continue;
+                }
+                iv.value = strtod(line + begin, &end_ptr);
+                if (end_ptr == line+begin || (end_ptr!=NULL && *end_ptr!=' ' && *end_ptr!='\n' && *end_ptr!='\t' && *end_ptr!='\r')) {
+                    LOG_ERROR("parse_item() failed: value_parse: index=%d [%s]", iv.index, line+begin);
+                    return false;
+                }
+
+                //LOG_NOTICE("%d:%f", iv.index, iv.value);
+                features.push_back(iv);
                 iv.index = -1;
+                index_illegal = false;
                 begin = i + 1;
             }
         }
+        return true;
     }
 
     /*

@@ -106,6 +106,15 @@ float LogitSolver::update(Instance_t& item) {
     
     // desc@ MSE-loss:
     //desc *= (1-p) * p;
+    // variant-update.
+    float x_square = 0;
+    float h_cst = 1.;
+    for (size_t i=0; i<item.features.size(); ++i) {
+        x_square += item.features[i].value * item.features[i].value;
+    }
+    if (x_square > 1e-4) {
+        desc *= (1. - exp(-h_cst * x_square)) / x_square;
+    }
 
     float reg = 0;
 

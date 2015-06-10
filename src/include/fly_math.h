@@ -136,7 +136,7 @@ float sgn(T x) {
  * Generate a random number between [-0.05, +0.05]
  */
 float random_05() {
-    return (rand() % 1000) / 10000.0 - 0.5;
+    return (rand() % 1000) / 10000.0 - 0.05;
 }
 
 float sigmoid(float x) {

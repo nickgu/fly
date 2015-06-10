@@ -106,6 +106,8 @@ class MeanStdvar_Uniform {
                         if (v>mx) v=mx;
                         else if (v<mn) v=mn; 
                         iv.value = (v - mn) / (mx - mn);
+                    } else {
+                        iv.value = 0; // never seen this feature.
                     }
                 }
             }
@@ -123,6 +125,8 @@ class MeanStdvar_Uniform {
                         if (v>mx) v=mx;
                         else if (v<mn) v=mn; 
                         iv.value = (v - mn) / (mx - mn);
+                    } else {
+                        iv.value = 0; // never seen this feature.
                     }
                 }
             }
