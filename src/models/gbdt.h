@@ -212,7 +212,7 @@ void* __worker_layer_processor(void* input) {
                     nod.split_id = si.index;
                 }
             }
-            //dim_id_sorted[ nod.grow++ ] = si.index;
+            dim_id_sorted[ nod.grow++ ] = si.index;
             nod.temp_sum += iinfo[ si.index ].residual;
         } 
     } else { // read from file. duplicate code for performance-critical demand.
