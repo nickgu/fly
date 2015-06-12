@@ -106,15 +106,25 @@ float LogitSolver::update(Instance_t& item) {
     
     // desc@ MSE-loss:
     //desc *= (1-p) * p;
-    // variant-update.
+
+    // variant-update : x_square.
+    /*
     float x_square = 0;
-    float h_cst = 1.;
+    float h_cst = 100.;
     for (size_t i=0; i<item.features.size(); ++i) {
         x_square += item.features[i].value * item.features[i].value;
     }
-    if (x_square > 1e-4) {
-        desc *= (1. - exp(-h_cst * x_square)) / x_square;
-    }
+
+    // variant-update for square.
+    desc *= (1. - exp(-h_cst * x_square)) / x_square;
+    */
+
+    // variant-update for hinge.
+    /*
+    float fake_y = 2. * (item.label - .5);
+    float fake_p = 2. * (p - .5);
+    desc = -fake_y * min( 0.f, (1-fake_y*fake_p)/x_square );
+    */
 
     float reg = 0;
 
@@ -166,6 +176,8 @@ float LogitSolver::update(Instance_t& item) {
     //loss = 0.5 * (item.label - p) * (item.label - p);
     // Loss@Log
     loss = -(item.label * safe_log(p) + (1-item.label) * safe_log(1-p));
+    // Loss@Hinge
+    //loss = max(0., 1- 4. * (item.label - .5) * (p - .5));
     return loss;
 }
 
