@@ -203,26 +203,52 @@ void split(char* s, const char* token, std::vector<std::string>& out) {
     return ;
 }
 
+class Lock_t {
+    public:
+        Lock_t() {
+            pthread_mutex_init(&_lock, 0);
+        }
+        ~Lock_t() {
+            pthread_mutex_destroy(&_lock);
+        }
+
+        void lock() {
+            pthread_mutex_lock(&_lock);
+            return ;
+        }
+
+        void unlock() {
+            pthread_mutex_unlock(&_lock);
+        }
+
+    private:
+        pthread_mutex_t _lock;
+};
+
 template <typename PtrType_t>
 class ThreadData_t {
     public:
         ThreadData_t(PtrType_t a) {
             _data = a;
-            pthread_spin_init(&_lock, 0);
+            pthread_mutex_init(&_lock, 0);
+        }
+
+        ThreadData_t() {
+            pthread_mutex_init(&_lock, 0);
         }
 
         PtrType_t borrow() {
-            pthread_spin_lock(&_lock);
+            pthread_mutex_lock(&_lock);
             return _data;
         }
 
         void give_back() {
-            pthread_spin_unlock(&_lock);
+            pthread_mutex_unlock(&_lock);
         }
 
     private:
         PtrType_t _data;
-        pthread_spinlock_t _lock;
+        pthread_mutex_t _lock;
 };
 
 /*

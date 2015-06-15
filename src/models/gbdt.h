@@ -43,15 +43,21 @@ struct TreeNode_t {
     int begin;
     int end;
     int cnt;
+
     int split;
     uint32_t split_id;
+    double split_sum;
+    double split_ssum;
 
     // aid info.
     int grow; // help for O(n) sort..
     uint32_t same_key;
+
     double sum;
     double square_sum;
+
     double temp_sum;
+    double temp_ssum;
 
     void init(size_t b, size_t e) {
         fidx = -1;
@@ -84,7 +90,7 @@ struct TreeNode_t {
     }
 
     bool operator< (const TreeNode_t& o) const {
-        return (o.fidx!=-1 && (fidx==-1 || o.score < score));
+        return (o.fidx!=-1 && (fidx==-1 || score > o.score));
     }
 
     string decision_info() const {
@@ -122,10 +128,13 @@ struct SmallTreeNode_t {
 };
 
 
+//#pragma pack(1)
 struct ItemInfo_t {
-    float   residual;
-    short   in_which_node;
+    float residual;
+    unsigned short in_which_node:14;
+    unsigned short turn:2;
 };
+//#pragma pack()
 
 struct Job_LayerFeatureProcess_t {
     bool selected;
@@ -138,20 +147,29 @@ struct Job_LayerFeatureProcess_t {
     const SortedIndex_t* finfo;
     FILE* sorted_index_fd;
 
-    const ItemInfo_t* iinfo;
+    ItemInfo_t* iinfo;
     TreeNode_t* tree;
-    uint32_t* calc_last_layer;
+
+    TreeNode_t*  master_tree;
+    Lock_t*      locks;
 };
 
-inline float __mid_rmse_score(float la, int lc, float ra, int rc)
+/**
+ * How to measure a split.
+ *  ( MSE(part_A) * N(A) + MSE(part_B) * N(B) ) / N(A+B)
+ *  (A_sq - A_sum*A_sum / N(A) + B_sq - B_sum*B_sum/N(B)) / N(A+B)
+ *  sq(A+B) / N(A+B) - 1/N(A+B) * ( A_sum*A_sum/NA + B_sum*B_sum/NB )
+ *                                ~~~~~~~~~  mid_score_part  ~~~~~~~~
+ * 
+ */
+inline float __mid_mse_score(float la, int lc, float ra, int rc)
 {
     /**
-     * la : left average.
+     * la : left sum.
      * lc : left count.
-     * ra : right average.
+     * ra : right sum.
      * rc : right count.
      */
-
     float ret=0;
     if (lc>0) ret += la/lc*la;
     if (rc>0) ret += ra/rc*ra;
@@ -159,10 +177,9 @@ inline float __mid_rmse_score(float la, int lc, float ra, int rc)
 }
 
 void* __worker_layer_processor(void* input) {
-    Timer ta;
+    Timer t_calc, t_post;
 
     Job_LayerFeatureProcess_t& job= *(Job_LayerFeatureProcess_t*)input;
-    uint32_t* dim_id_sorted = job.calc_last_layer;
     if (!job.selected) {
         pthread_exit(0);
     }
@@ -175,91 +192,110 @@ void* __worker_layer_processor(void* input) {
     for (int i=job.beg_node; i<job.end_node; ++i) {
         job.tree[i].temp_sum = 0;
         job.tree[i].cnt = job.tree[i].end - job.tree[i].begin;
-        job.tree[i].score = __mid_rmse_score(0, 0, job.tree[i].sum, job.tree[i].cnt);
+        job.tree[i].score = __mid_mse_score(0, 0, job.tree[i].sum, job.tree[i].cnt);
     }
 
-    ta.begin();
+    t_calc.begin();
+
     // critical time demand.
     // make sort step over. in O(n)
     uint32_t same_key = INVALID_SAME_KEY;
-    const ItemInfo_t* iinfo = job.iinfo;
+    ItemInfo_t* iinfo = job.iinfo;
     uint32_t item_count = job.item_count;
-    if (job.finfo != NULL) {
-        for (uint32_t i=0; i<item_count; ++i) {
-            SortedIndex_t si = job.finfo[i];
+    uint32_t * dim_id_sorted = new uint32_t[item_count];
 
-            if (!si.same) { 
-                // set same_key as 
-                // first index of continuous same value.
-                same_key = i;
-            }
-            
-            // sample out not useful data.
-            if ( !ITEM_SAMPLE(si.index) ) {
-                continue;
-            }
+    uint32_t update_cnt = 0;
+    uint32_t update_try = 0;
+    for (uint32_t i=0; i<item_count; ++i) {
+        const SortedIndex_t& si = job.finfo[i];
 
-            TreeNode_t& nod = job.tree[ job.iinfo[ si.index ].in_which_node ];
-            if (!si.same || nod.same_key!=same_key) { 
-                nod.same_key = same_key;
-                float temp_score = __mid_rmse_score(
-                        nod.temp_sum, nod.grow-nod.begin,
-                        nod.sum-nod.temp_sum, nod.end-nod.grow);
-                if (temp_score > nod.score) {
-                    nod.fidx = job.feature_index;
-                    nod.score = temp_score;
-                    nod.split = nod.grow;
-                    nod.split_id = si.index;
-                }
-            }
-            dim_id_sorted[ nod.grow++ ] = si.index;
-            nod.temp_sum += iinfo[ si.index ].residual;
-        } 
-    } else { // read from file. duplicate code for performance-critical demand.
-        FILE* fd = job.sorted_index_fd;
-        fseek(fd, 0, SEEK_SET);
-        for (uint32_t i=0; i<item_count; ++i) {
-            // read from file.
-            SortedIndex_t si;
-            fread(&si, sizeof(si), 1, fd);
+        if (!si.same) { 
+            // set same_key as 
+            // first index of continuous same value.
+            same_key = i;
+        }
+        
+        // sample out not useful data.
+        if ( !ITEM_SAMPLE(si.index) ) {
+            continue;
+        }
 
-            if (!si.same) { 
-                // set same_key as 
-                // first index of continuous same value.
-                same_key = i;
-            }
+        TreeNode_t& nod = job.tree[ iinfo[ si.index ].in_which_node ];
+        if (!si.same || nod.same_key!=same_key) { 
+            update_try ++;
+            nod.same_key = same_key;
+            float temp_score = __mid_mse_score(
+                    nod.temp_sum, nod.grow-nod.begin,
+                    nod.sum-nod.temp_sum, nod.end-nod.grow);
+            if (temp_score > nod.score) {
+                update_cnt ++;
+                nod.fidx = job.feature_index;
+                nod.score = temp_score;
+                nod.split = nod.grow;
+                nod.split_id = si.index;
 
-            // sample out not useful data.
-            if ( !ITEM_SAMPLE(si.index) ) {
-                continue;
+                nod.split_sum = nod.temp_sum;
+                nod.split_ssum = nod.temp_ssum;
             }
+        }
+        dim_id_sorted[ nod.grow++ ] = si.index;
+        nod.temp_sum += iinfo[si.index].residual;
+        nod.temp_ssum += iinfo[si.index].residual * iinfo[si.index].residual;
+    } 
 
-            TreeNode_t& nod = job.tree[ job.iinfo[ si.index ].in_which_node ];
-            if (!si.same || nod.same_key!=same_key) { 
-                nod.same_key = same_key;
-                float temp_score = __mid_rmse_score(
-                        nod.temp_sum, nod.grow-nod.begin,
-                        nod.sum-nod.temp_sum, nod.end-nod.grow);
-                if (temp_score > nod.score) {
-                    nod.fidx = job.feature_index;
-                    nod.score = temp_score;
-                    nod.split = nod.grow;
-                    nod.split_id = si.index;
-                }
-            }
-            dim_id_sorted[ nod.grow++ ] = si.index;
-            nod.temp_sum += iinfo[ si.index ].residual;
-        } 
-    }
+    t_calc.end();
+    t_post.begin();
 
+    TreeNode_t* master_tree = job.master_tree;
+    int update_node_counter = 0;
     for (int n=job.beg_node; n<job.end_node; ++n) {
-        TreeNode_t& node = job.tree[n];
-        node.end = node.grow;
-        node.score = (node.square_sum - node.score) / node.cnt;
-    }
 
-    ta.end();
-    LOG_DEBUG("Feature %d training time=%.2fs", job.feature_index, ta.cost_time());
+        TreeNode_t& node = job.tree[n];
+        node.fidx = job.feature_index;
+        node.end = node.grow;
+        // change score from middle-score to MSE.
+        node.score = (node.square_sum - node.score) / node.cnt;
+
+        if (master_tree[n] < job.tree[n]) {
+            // lock node.
+            job.locks[n].lock();
+            update_node_counter ++;
+
+            // update node and in_which_node info.
+            master_tree[n] = job.tree[n];
+
+            master_tree[_L(n)].init(node.begin, node.split);
+            master_tree[_L(n)].sum = node.split_sum;
+            master_tree[_L(n)].square_sum = node.split_ssum;
+
+            master_tree[_R(n)].init(node.split, node.end);
+            master_tree[_R(n)].sum = node.sum - node.split_sum;
+            master_tree[_R(n)].square_sum = node.square_sum - node.split_ssum;
+
+            for (int i=job.tree[n].begin; i<job.tree[n].split; ++i) {
+                iinfo[ dim_id_sorted[i] ].turn = 1;
+            }
+            for (int i=job.tree[n].split; i<job.tree[n].end; ++i) {
+                iinfo[ dim_id_sorted[i] ].turn = 2;
+            }
+
+            // end lock.
+            job.locks[n].unlock();
+        }
+    }
+    t_post.end();
+
+    LOG_DEBUG("Feature %d tm=%.2fs [%.2f+%.2f] update_node: %d update=%d/%d", 
+            job.feature_index, 
+            t_calc.cost_time() + t_post.cost_time(),
+            t_calc.cost_time(),
+            t_post.cost_time(),
+            update_node_counter,
+            update_cnt, update_try
+            );
+
+    // only lock in above section.
+    delete [] dim_id_sorted;
     pthread_exit(0);
 }
 
@@ -317,9 +353,6 @@ class GBDT_t
 
             _preprocess_maximum_memory = config.conf_int_default(section, "preprocess_maximum_memory", 60);
             LOG_NOTICE("_preprocess_maximum_memory=%d(G)", _preprocess_maximum_memory);
-
-            _compact_memory_demand = config.conf_int_default(section, "compact_memory_demand", 0);
-            LOG_NOTICE("_compact_memory_demand=%d", _compact_memory_demand);
 
             string s = config.conf_str_default(section, "feature_mask", "");
             vector<string> vs;
@@ -652,24 +685,19 @@ class GBDT_t
             }
         
             // temp: load all field in memory.
-            if (!_compact_memory_demand) {
-                LOG_NOTICE("Load SortedIndex from ffds..");
-                _sorted_fields = new SortedIndex_t*[_dim_count];
-                Timer tm;
-                tm.begin();
+            LOG_NOTICE("Load SortedIndex from ffds..");
+            _sorted_fields = new SortedIndex_t*[_dim_count];
+            Timer tm;
+            tm.begin();
 
-                for (int i=0; i<_dim_count; ++i) {
-                    _sorted_fields[i] = new SortedIndex_t[_item_count];
-                    fseek(_ffd[i], 0, SEEK_SET);
-                    fread(_sorted_fields[i], _item_count, sizeof(SortedIndex_t), _ffd[i]);
-                }
-
-                tm.end();
-                LOG_NOTICE("load field time: %.2fs", tm.cost_time());
-            } else {
-                LOG_NOTICE("SKIP loading from SortedIndex ffd.");
-                _sorted_fields = NULL;
+            for (int i=0; i<_dim_count; ++i) {
+                _sorted_fields[i] = new SortedIndex_t[_item_count];
+                fseek(_ffd[i], 0, SEEK_SET);
+                fread(_sorted_fields[i], _item_count, sizeof(SortedIndex_t), _ffd[i]);
             }
+
+            tm.end();
+            LOG_NOTICE("load field time: %.2fs", tm.cost_time());
             return ;
         }
 
@@ -678,6 +706,7 @@ class GBDT_t
             for (int i=0; i<_tree_count; ++i) {
                 _trees[i] = new TreeNode_t[_tree_size];
             }
+            Lock_t* locks = new Lock_t[_tree_size];
 
             ItemInfo_t* iinfo = new ItemInfo_t[_item_count];  // [item_id] : residual, in_which_node.
             Job_LayerFeatureProcess_t* jobs = new Job_LayerFeatureProcess_t[_dim_count];
@@ -685,17 +714,17 @@ class GBDT_t
 
             for (int D=0; D<_dim_count; ++D) {
                 jobs[D].tree = new TreeNode_t[_tree_size];
-                jobs[D].calc_last_layer = new uint32_t[_item_count];
             }
             // initialize target.
             for (size_t i=0; i<_item_count; ++i) {
                 iinfo[i].residual = _labels[i].residual;
             }
 
+
             for (int T=0; T<_tree_count; ++T) {
                 Timer tree_tm, sample_tm;
                 tree_tm.begin();
-            
+
                 // Initialize.
                 TreeNode_t& root = _trees[T][0];
                 root.init(0, _item_count);
@@ -709,16 +738,19 @@ class GBDT_t
                 size_t sample_item_count = 0;
                 for (size_t i=0; i<_item_count; ++i) {
                     iinfo[i].in_which_node = 0;
+                    iinfo[i].turn = 0;
                     if ( ITEM_SAMPLE(i) ) {
                         sample_item_count += 1;
                         root.sum += iinfo[i].residual;
                         root.square_sum += iinfo[i].residual * iinfo[i].residual;
                     }
                 }
+                root.cnt = sample_item_count;
+                root.end = root.cnt;
                 sample_tm.end();
 
                 LOG_NOTICE("Begin training tree[%d/%d] : mse=%f (sqsum=%f,sum=%f,cnt=%d(samp=%d)) sample_tm=%.2f", 
-                        T, _tree_count, 
+                        T+1, _tree_count, 
                         (root.square_sum - root.sum*root.sum/root.cnt)/root.cnt,
                         root.square_sum, root.sum, root.cnt, sample_item_count, sample_tm.cost_time() );
 
@@ -729,6 +761,11 @@ class GBDT_t
                 // Each layer
                 for (int L=0; L<_max_layer; ++L) {
                     Timer multi_tm, post_tm;
+
+                    for (size_t i=0; i<_item_count; ++i) {
+                        if ( ITEM_SAMPLE(i) ) {
+                        }
+                    }
 
                     multi_tm.begin();
                     int selected_feature_count = 0;
@@ -743,80 +780,43 @@ class GBDT_t
                         if (_sample(_sample_feature) 
                                 && selected_feature_count<_dim_count*_sample_feature) 
                         {
+                            jobs[D].master_tree = _trees[T];
+                            jobs[D].locks = locks;
                             jobs[D].selected = true;
                             jobs[D].item_count = _item_count;
                             jobs[D].feature_index = D;
                             jobs[D].beg_node = beg_node;
                             jobs[D].end_node = end_node;
                             jobs[D].all_node_count = all_node_count;
-
-                            if (_compact_memory_demand) {
-                                jobs[D].finfo = NULL;
-                                jobs[D].sorted_index_fd = _ffd[D];
-                            } else {
-                                jobs[D].finfo = _sorted_fields[D];
-                                jobs[D].sorted_index_fd = NULL;
-                            }
+                            jobs[D].finfo = _sorted_fields[D];
                             jobs[D].iinfo = iinfo;
                             memcpy(jobs[D].tree, _trees[T], _tree_size * sizeof(TreeNode_t));
 
                             selected_feature_count ++;
                         }
                     }
+                    // calculation.
                     multi_thread_jobs(__worker_layer_processor, jobs, _dim_count, _thread_num);
                     multi_tm.end();
 
                     post_tm.begin();
-                    // find best node.
-                    for (int i=beg_node; i<end_node; ++i) {
-                        for (int D=0; D<_dim_count; ++D) {
-                            if (jobs[D].selected && _trees[T][i] < jobs[D].tree[i]) {
-                                _trees[T][i] = jobs[D].tree[i];
-                            }
-                        }
-                    }
-                    for (int n=beg_node; n<end_node; ++n) {
-                        TreeNode_t& node = _trees[T][n];
-                        if (node.fidx != -1) {
-                            // accumlulate the score to the feature weight.
-                            _feature_weight[node.fidx] += _trees[T][n].score;
-
-                            _trees[T][_L(n)].init(node.begin, node.split);
-                            _trees[T][_R(n)].init(node.split, node.end);
-                            double sum = 0;
-                            double ssum = 0;
-                            int b = _trees[T][_L(n)].begin;
-                            int e = _trees[T][_L(n)].end;
-                            for (int i=b; i<e; ++i) {
-                                uint32_t id = jobs[node.fidx].calc_last_layer[i];
-                                float d = iinfo[id].residual;
-                                iinfo[id].in_which_node = _L(n);
-                                sum += d;
-                                ssum += d*d;
-                            }
-                            _trees[T][_L(n)].sum = sum;
-                            _trees[T][_L(n)].square_sum = ssum;
-                            sum = ssum = 0;
-                            b = _trees[T][_R(n)].begin;
-                            e = _trees[T][_R(n)].end;
-                            for (int i=b; i<e; ++i) {
-                                uint32_t id = jobs[node.fidx].calc_last_layer[i];
-                                float d = iinfo[id].residual;
-                                iinfo[id].in_which_node = _R(n);
-                                sum += d;
-                                ssum += d*d;
-                            }
-                            _trees[T][_R(n)].sum = sum;
-                            _trees[T][_R(n)].square_sum = ssum;
-                        }
-                    }
-
                     for (int i=beg_node; i<end_node; ++i) {
                         if (_trees[T][i].fidx>=0) {
+                            // accumlulate the score to the feature weight.
+                            _feature_weight[_trees[T][i].fidx] += _trees[T][i].score;
+
                             if (all_node_count<=_R(i)) {
                                 all_node_count = _R(i)+1;
                             }
                         }
+                    }
+                    for (size_t i=0; i<_item_count; ++i) {
+                        if (iinfo[i].turn == 1) {
+                            iinfo[i].in_which_node = _L(iinfo[i].in_which_node);
+                        } else if (iinfo[i].turn == 2) {
+                            iinfo[i].in_which_node = _R(iinfo[i].in_which_node);
+                        }
+                        iinfo[i].turn = 0;
                     }
                     post_tm.end();
 
@@ -868,6 +868,7 @@ class GBDT_t
             } // tree end.
 
             // make-up missing value: threshold and mean.
+            LOG_NOTICE("Begin to recover node threshold.");
             vector<ItemID_ReverseInfo_t> reverse_array;
             for (int t=0; t<_tree_count; ++t) {
                 for (int i=0; i<_tree_size; ++i) {
@@ -923,14 +924,12 @@ class GBDT_t
                     _mean[T][i] = _trees[T][i].mean * _sr;
                 }
             }
+            LOG_NOTICE("recover over.");
 
             delete [] tids;
-            for (int D=0; D<_dim_count; ++D) {
-                delete [] jobs[D].tree;
-                delete [] jobs[D].calc_last_layer;
-            }
             delete [] jobs;
             delete [] iinfo;
+            delete [] locks;
         }
 
         int layer_num() const { return _max_layer; }
@@ -955,7 +954,6 @@ class GBDT_t
 
         FILE**          _ffd;
         SortedIndex_t** _sorted_fields;
-        bool            _compact_memory_demand;
 
         uint32_t  _item_count;
         int     _dim_count;
