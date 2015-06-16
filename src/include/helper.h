@@ -319,7 +319,7 @@ class PCPool_t {
         // Customer try to get.
         // loop util get.
         // return false if nothing to process forever.
-        bool get(T* out_item) {
+        bool get(T* out_item, uint32_t* out_order_id = NULL) {
             // retry until work or full.
             while (1) {
                 pthread_spin_lock(&_spinlock);
@@ -340,6 +340,9 @@ class PCPool_t {
                 size_t m = _c_id;
                 //LOG_NOTICE("get: %d,%d (%d)", _p_id, _c_id, _total_put);
                 _c_id = (_c_id + 1) % _buffer_size;
+                if (out_order_id) {
+                    *out_order_id = _total_get;
+                }
                 _total_get += 1;
                 *out_item = _buffer[m];
                 // unlock.

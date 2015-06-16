@@ -15,7 +15,7 @@
 
 #include "all_models.h"
 
-void test(FlyReader_t* treader, FlyModel_t* model, int thread_num);
+void test(FlyReader_t* treader, FlyModel_t* model, int thread_num, FILE* output_file);
 
 void show_help() {
     fprintf(stderr, 
@@ -253,7 +253,13 @@ int main(int argc, char** argv) {
             test_data_reader->reset();
         }
 
-        test(test_data_reader, model, thread_num);
+        FILE* output_fd = fopen(output_file, "w");
+        if (!output_fd) {
+            LOG_ERROR("Cannot open output file [%s] to write.", output_fd);
+            exit(-1);
+        }
+        test(test_data_reader, model, thread_num, output_fd);
+        fclose(output_fd);
 
         if (!test_and_train_is_same) {
             delete test_data_reader;
@@ -275,6 +281,7 @@ struct TestJob_t {
     FlyReader_t* reader;
     FArray_t<ResultPair_t> ans_list;
     FlyModel_t* model;
+    ThreadData_t<FILE*>* output_file;
 };
 
 void* thread_test(void* c) {
@@ -300,26 +307,39 @@ void* thread_test(void* c) {
         LOG_NOTICE("thread[%d] : I am a worker.", job.job_id);
         job.ans_list.clear();
         Instance_t item;
-        while (job.pool->get(&item)) {
+        uint32_t order_id;
+        while (job.pool->get(&item, &order_id)) {
             float ans;
             ans = job.model->predict(item);
             job.ans_list.push_back(ResultPair_t(item.label, ans));
+
+            if (job.output_file) {
+                FILE* of = job.output_file->borrow();
+                fprintf(of, "%f\t%f\t%d\n", item.label, ans, order_id);
+                job.output_file->give_back();
+            }
         }
         LOG_NOTICE("thread[%d] : over. %d processed.", job.job_id, job.ans_list.size());
     }
     return NULL;
 }
 
-void test(FlyReader_t* treader, FlyModel_t* model, int thread_num) {
+void test(FlyReader_t* treader, FlyModel_t* model, int thread_num, FILE* output_file) {
     // 1 reader + thread_num workers.
     thread_num += 1;
     TestJob_t* jobs = new TestJob_t[thread_num];
     PCPool_t<Instance_t> pool(2000000);
+    ThreadData_t<FILE*> shared_output(output_file);
     for (int i=0; i<thread_num; ++i) {
         jobs[i].pool = &pool;
         jobs[i].job_id = i;
         jobs[i].reader = NULL;
         jobs[i].model = model;
+        if (output_file) {
+            jobs[i].output_file = &shared_output;
+        } else {
+            jobs[i].output_file = NULL;
+        }
     }
     jobs[0].reader = treader;
 
