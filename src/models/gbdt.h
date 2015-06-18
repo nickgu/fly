@@ -202,7 +202,8 @@ void* __worker_layer_processor(void* input) {
     uint32_t same_key = INVALID_SAME_KEY;
     ItemInfo_t* iinfo = job.iinfo;
     uint32_t item_count = job.item_count;
-    uint32_t * dim_id_sorted = new uint32_t[item_count];
+    register uint32_t *dim_id_sorted = new uint32_t[item_count];
+    TreeNode_t* master_tree = job.master_tree;
 
     uint32_t update_cnt = 0;
     uint32_t update_try = 0;
@@ -215,12 +216,15 @@ void* __worker_layer_processor(void* input) {
             same_key = i;
         }
         
+        register uint32_t ind = si.index;
         // sample out not useful data.
-        if ( !ITEM_SAMPLE(si.index) ) {
+        if ( !ITEM_SAMPLE(ind) ) {
             continue;
         }
 
-        TreeNode_t& nod = job.tree[ iinfo[ si.index ].in_which_node ];
+        register int nid = iinfo[ ind ].in_which_node;
+        TreeNode_t& nod = job.tree[nid];
+
         if (!si.same || nod.same_key!=same_key) { 
             update_try ++;
             nod.same_key = same_key;
@@ -232,21 +236,20 @@ void* __worker_layer_processor(void* input) {
                 nod.fidx = job.feature_index;
                 nod.score = temp_score;
                 nod.split = nod.grow;
-                nod.split_id = si.index;
+                nod.split_id = ind;
 
                 nod.split_sum = nod.temp_sum;
                 nod.split_ssum = nod.temp_ssum;
             }
         }
-        dim_id_sorted[ nod.grow++ ] = si.index;
-        nod.temp_sum += iinfo[si.index].residual;
-        nod.temp_ssum += iinfo[si.index].residual * iinfo[si.index].residual;
+        nod.temp_sum += iinfo[ind].residual;
+        nod.temp_ssum += iinfo[ind].residual * iinfo[ind].residual;
+        dim_id_sorted[ nod.grow++ ] = ind;
     } 
 
     t_calc.end();
     t_post.begin();
 
-    TreeNode_t* master_tree = job.master_tree;
     int update_node_counter = 0;
     for (int n=job.beg_node; n<job.end_node; ++n) {
 
@@ -299,17 +302,36 @@ void* __worker_layer_processor(void* input) {
     pthread_exit(0);
 }
 
+struct FeatureInfo_t {
+    int index;
+    float value;
+
+    bool operator < (const FeatureInfo_t& o) const {
+        if (value == o.value) {
+            // magic: ..why reversed order..
+            return index > o.index;
+        }
+        return value < o.value;
+    }
+};
+
+struct __GBDTPreprocessSortJob_t {
+    int fid;
+    FeatureInfo_t* ptr;
+    size_t count;
+};
+
+void* __sorted_feature_index(void* con) {
+    __GBDTPreprocessSortJob_t& job = *(__GBDTPreprocessSortJob_t*)con;
+    LOG_NOTICE("sort dim : %d", job.fid);
+    sort(job.ptr, job.ptr+job.count);
+    LOG_NOTICE("sort dim %d over.", job.fid);
+    return NULL;
+}
+
 class GBDT_t 
     : public FlyModel_t
 {
-    struct FeatureInfo_t {
-        int index;
-        float value;
-
-        bool operator < (const FeatureInfo_t& o) const {
-            return value < o.value;
-        }
-    };
 
     struct ItemID_ReverseInfo_t {
         uint32_t item_id;
@@ -336,10 +358,6 @@ class GBDT_t
             _sample_instance = config.conf_float_default(section, "sample_instance", 1.0);
             LOG_NOTICE("Sample_info: feature=%.2f instance=%.2f", _sample_feature, _sample_instance);
 
-            // directory.
-            _feature_load_dir = config.conf_str_default(section, "feature_load_dir", "");
-            LOG_NOTICE("Feature_load_dir: [%s]", _feature_load_dir.c_str());
-
             _tree_count = config.conf_int_default(section, "tree_num", 100);
             _max_layer = config.conf_int_default(section, "layer_num", 5);
             _thread_num = config.conf_int_default(section, "thread_num", 8);
@@ -354,9 +372,19 @@ class GBDT_t
             _preprocess_maximum_memory = config.conf_int_default(section, "preprocess_maximum_memory", 60);
             LOG_NOTICE("_preprocess_maximum_memory=%d(G)", _preprocess_maximum_memory);
 
+            _temp_dir = config.conf_str_default(section, "temp_dir", "gbdt_temp");
+            LOG_NOTICE("_temp_dir=%s", _temp_dir.c_str());
+
+            _load_cache = config.conf_int_default(section, "load_cache", 0);
+            LOG_NOTICE("_load_cache=%d", _load_cache);
+
+            _save_model_epoch = config.conf_int_default(section, "save_model_epoch", -1);
+            LOG_NOTICE("_save_model_epoch=%d", _save_model_epoch);
+
             string s = config.conf_str_default(section, "feature_mask", "");
             vector<string> vs;
             split((char*)s.c_str(), ",", vs);
+            LOG_NOTICE("_feature_mask=%s", s.c_str());
             for (size_t i=0; i<vs.size(); ++i) {
                 int f = atoi(vs[i].c_str());
                 LOG_NOTICE("mask_feature: %d", f);
@@ -557,15 +585,15 @@ class GBDT_t
 
             _labels = new ItemInfo_t[_item_count];
             _ffd = new FILE*[_dim_count];
-            if (_feature_load_dir != "") { 
-                LOG_NOTICE("Load feature from dir..[%s]", _feature_load_dir.c_str());
+            if (_load_cache) { 
+                LOG_NOTICE("Load feature cache from dir..[%s]", _temp_dir.c_str());
                 for (int fid=0; fid<_dim_count; ++fid) {
                     char buf[32];
-                    snprintf(buf, sizeof(buf), "%s/feature.%d", _feature_load_dir.c_str(), fid);
+                    snprintf(buf, sizeof(buf), "%s/feature.%d", _temp_dir.c_str(), fid);
                     _ffd[fid] = fopen(buf, "r");
                     if (_ffd[fid] == NULL) {
                         LOG_ERROR("Cannot open file [%s] to write index info.");
-                        throw std::runtime_error(_feature_load_dir);
+                        throw std::runtime_error(_temp_dir);
                     }
                 }
                 Instance_t item;
@@ -596,8 +624,9 @@ class GBDT_t
                         preprocess_memory_each_feature * 1. / (1<<30),
                         epoch_count);
 
-                system("rm -rf gbdt_temp");
-                system("mkdir gbdt_temp");
+                // clear temp_dir.
+                system( (string("rm -rf ") + _temp_dir).c_str() );
+                system( (string("mkdir ") + _temp_dir).c_str() );
 
                 FeatureInfo_t **ptr = new FeatureInfo_t*[epoch_count];
                 for (int i=0; i<epoch_count; ++i) {
@@ -610,6 +639,11 @@ class GBDT_t
                     Instance_t item;
                     size_t item_id = 0;
                     int cur_per = 0;
+                    int feature_count = epoch_count;
+                    if (feature_begin + epoch_count > _dim_count) {
+                        feature_count = _dim_count - feature_begin;
+                    }
+
                     reader->reset();
                     while (reader->read(&item/*, true*/)) {
                         _labels[item_id].residual = item.label;
@@ -638,30 +672,38 @@ class GBDT_t
                     }
                     fprintf(stderr, "\n");
 
+                    __GBDTPreprocessSortJob_t* jobs = new __GBDTPreprocessSortJob_t[feature_count];
+                    for (int i=0; i<feature_count; ++i) {
+                        jobs[i].fid = feature_begin + i;
+                        jobs[i].ptr = ptr[i];
+                        jobs[i].count = _item_count;
+                    }
+                    multi_thread_jobs(__sorted_feature_index, jobs, feature_count, feature_count);
+                    delete [] jobs;
+
                     for (int offset=0; offset<epoch_count; ++offset) {
                         int fid = offset + feature_begin;
                         if (fid >= _dim_count) {
                             break;
                         }
 
-                        LOG_NOTICE("sort dim : %d (offset=%d)", fid, offset);
-                        sort(ptr[offset], ptr[offset]+_item_count);
-                        LOG_NOTICE("sort dim %d over.", fid);
 
                         // set is_same flag.
                         // if set, continuous item has same value(Cannot be splited)
+                        size_t diff_value = 0;
                         for (size_t i=0; i<_item_count; ++i) {
                             idx_list[i].index = ptr[offset][i].index;
                             if (i>0 && ptr[offset][i].value == ptr[offset][i-1].value) {
                                 idx_list[i].same = 1;
                             } else {
                                 idx_list[i].same = 0;
+                                diff_value ++;
                             }
                         }
-                        LOG_NOTICE("check same info [%d] over.", fid);
+                        LOG_NOTICE("check same info feature=[%d] diff_value=%u over.", fid, diff_value);
 
                         char buf[32];
-                        snprintf(buf, sizeof(buf), "gbdt_temp/feature.%d", fid);
+                        snprintf(buf, sizeof(buf), "%s/feature.%d", _temp_dir.c_str(), fid);
                         FILE* fout = fopen(buf, "wb");
                         if (!fout) {
                             LOG_ERROR("open temp directory to save field information failed! [%s]", buf);
@@ -691,6 +733,10 @@ class GBDT_t
             tm.begin();
 
             for (int i=0; i<_dim_count; ++i) {
+                if (_feature_mask.find(i) != _feature_mask.end()) {
+                    _sorted_fields[i] = NULL;
+                    continue;
+                }
                 _sorted_fields[i] = new SortedIndex_t[_item_count];
                 fseek(_ffd[i], 0, SEEK_SET);
                 fread(_sorted_fields[i], _item_count, sizeof(SortedIndex_t), _ffd[i]);
@@ -719,7 +765,6 @@ class GBDT_t
             for (size_t i=0; i<_item_count; ++i) {
                 iinfo[i].residual = _labels[i].residual;
             }
-
 
             for (int T=0; T<_tree_count; ++T) {
                 Timer tree_tm, sample_tm;
@@ -865,10 +910,88 @@ class GBDT_t
                 LOG_NOTICE("Training tree[%d] tm=%.2fs (finalize=%.2fs)", 
                         T, tree_tm.cost_time(),
                         tree_finalize_tm.cost_time());
+
+                if (_save_model_epoch>0 && (T+1)%_save_model_epoch == 0) {
+                    _rebuild_tree();
+                    // auto-save model.
+                    char fn[256];
+                    snprintf(fn, sizeof(fn), "%s/autosave.%04d.gbdt.model", _temp_dir.c_str(), T+1);
+                    FILE* autosave = fopen(fn, "w");
+                    if (!autosave) {
+                        LOG_ERROR("Fail to save autosave model. [%s]", fn);
+                    } else {
+                        write_model( autosave );
+                        fclose(autosave);
+                    }
+                }
             } // tree end.
 
+            // rebuild tree.
+            _rebuild_tree();
+            // auto-save model.
+            FILE* autosave = fopen((_temp_dir + "/autosave.gbdt.model").c_str(), "w");
+            if (!autosave) {
+                LOG_ERROR("Fail to save autosave model. [%s]", (_temp_dir + "/autosave.gbdt.model").c_str());
+            } else {
+                write_model( autosave );
+                fclose(autosave);
+            }
+
+            delete [] tids;
+            delete [] jobs;
+            delete [] iinfo;
+            delete [] locks;
+        }
+
+        int layer_num() const { return _max_layer; }
+        size_t tree_node_count() const { return (1<< (_max_layer + 1)); }
+
+    private:
+        FlyReader_t* _reader;
+
+        int         _tree_count;
+        int         _max_layer;
+        int         _thread_num;
+        float       _sr;
+
+        string      _temp_dir;
+        bool        _load_cache;
+        int         _save_model_epoch;
+
+        float _sample_feature;
+        float _sample_instance;
+
+        int             _tree_size;
+        TreeNode_t**    _trees;  // node buffer.
+
+        ItemInfo_t*     _labels;
+
+        FILE**          _ffd;
+        SortedIndex_t** _sorted_fields;
+
+        uint32_t  _item_count;
+        int     _dim_count;
+        size_t  _preprocess_maximum_memory;
+
+        SmallTreeNode_t** _compact_trees;
+        float**         _mean;
+
+        // debug feature weight.
+        float    *_feature_weight;
+        bool     _output_feature_weight;
+        bool     _feature_begin_at_0;
+        std::set<int> _feature_mask;
+        int      _predict_tree_cut;
+
+        bool _sample(float ratio) const {
+            return ((random()%10000) / 10000.0) <= ratio;
+        }
+
+        void _rebuild_tree() {
             // make-up missing value: threshold and mean.
-            LOG_NOTICE("Begin to recover node threshold.");
+            Timer rebuild_tm; 
+            rebuild_tm.begin();
+            LOG_NOTICE("REBUILD_TREE: begin to recover node threshold.");
             vector<ItemID_ReverseInfo_t> reverse_array;
             for (int t=0; t<_tree_count; ++t) {
                 for (int i=0; i<_tree_size; ++i) {
@@ -924,53 +1047,8 @@ class GBDT_t
                     _mean[T][i] = _trees[T][i].mean * _sr;
                 }
             }
-            LOG_NOTICE("recover over.");
-
-            delete [] tids;
-            delete [] jobs;
-            delete [] iinfo;
-            delete [] locks;
-        }
-
-        int layer_num() const { return _max_layer; }
-        size_t tree_node_count() const { return (1<< (_max_layer + 1)); }
-
-    private:
-        FlyReader_t* _reader;
-
-        int         _tree_count;
-        int         _max_layer;
-        string      _feature_load_dir;
-        int         _thread_num;
-        float       _sr;
-
-        float _sample_feature;
-        float _sample_instance;
-
-        int             _tree_size;
-        TreeNode_t**    _trees;  // node buffer.
-
-        ItemInfo_t*     _labels;
-
-        FILE**          _ffd;
-        SortedIndex_t** _sorted_fields;
-
-        uint32_t  _item_count;
-        int     _dim_count;
-        size_t  _preprocess_maximum_memory;
-
-        SmallTreeNode_t** _compact_trees;
-        float**         _mean;
-
-        // debug feature weight.
-        float    *_feature_weight;
-        bool     _output_feature_weight;
-        bool     _feature_begin_at_0;
-        std::set<int> _feature_mask;
-        int      _predict_tree_cut;
-
-        bool _sample(float ratio) const {
-            return ((random()%10000) / 10000.0) <= ratio;
+            rebuild_tm.end();
+            LOG_NOTICE("recover over. tm=%.2fs", rebuild_tm.cost_time());
         }
 };
 

@@ -272,8 +272,8 @@ class BinaryFeatureReader_t
                 int cur_per = int(process_size * 100.0f / total_file_size);
                 if (cur_per > percentage) {
                     percentage = cur_per;
-                    fprintf(stderr, "%cPreprocessing complete %d%% (%d/%d mb)", 
-                            13, percentage, process_size>>20, total_file_size>>20);
+                    fprintf(stderr, "%cPreprocessing complete %d%% [%d/%d mb] [%lu record(s)]", 
+                            13, percentage, process_size>>20, total_file_size>>20, _size);
                     fflush(stderr);
                 }
             }
