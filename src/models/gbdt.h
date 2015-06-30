@@ -16,6 +16,10 @@
 
 #include <emmintrin.h>
 
+#define _PREFETCH_STEP      (12)
+#define _PREFETCH_STEP_POST (12)
+#define _PREFETCH_TYPE (_MM_HINT_T1)
+
 #define INVALID_SAME_KEY (0xffffffff)
 
 int _L(int x) {return x*2+1;}
@@ -180,9 +184,6 @@ inline float __mid_mse_score(float la, int lc, float ra, int rc)
 }
 
 void* __worker_layer_processor(void* input) {
-#define _PREFETCH_STEP      (12)
-#define _PREFETCH_STEP_POST (12)
-#define _PREFETCH_TYPE (_MM_HINT_T1)
 
     Timer t_calc, t_post;
 
@@ -811,11 +812,6 @@ class GBDT_t
                 // Each layer
                 for (int L=0; L<_max_layer; ++L) {
                     Timer multi_tm, post_tm;
-
-                    for (size_t i=0; i<_item_count; ++i) {
-                        if ( ITEM_SAMPLE(i) ) {
-                        }
-                    }
 
                     multi_tm.begin();
                     int selected_feature_count = 0;
