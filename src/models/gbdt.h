@@ -14,6 +14,8 @@
 
 #include <set>
 
+#include <emmintrin.h>
+
 #define INVALID_SAME_KEY (0xffffffff)
 
 int _L(int x) {return x*2+1;}
@@ -177,6 +179,10 @@ inline float __mid_mse_score(float la, int lc, float ra, int rc)
 }
 
 void* __worker_layer_processor(void* input) {
+#define _PREFETCH_STEP      (8)
+#define _PREFETCH_STEP_POST (8)
+#define _PREFETCH_TYPE (_MM_HINT_T1)
+
     Timer t_calc, t_post;
 
     Job_LayerFeatureProcess_t& job= *(Job_LayerFeatureProcess_t*)input;
@@ -202,13 +208,18 @@ void* __worker_layer_processor(void* input) {
     uint32_t same_key = INVALID_SAME_KEY;
     ItemInfo_t* iinfo = job.iinfo;
     uint32_t item_count = job.item_count;
-    register uint32_t *dim_id_sorted = new uint32_t[item_count];
+    register int *dim_id_sorted = new int[item_count];
     TreeNode_t* master_tree = job.master_tree;
 
     uint32_t update_cnt = 0;
     uint32_t update_try = 0;
     for (uint32_t i=0; i<item_count; ++i) {
         const SortedIndex_t& si = job.finfo[i];
+
+        // prefetch-optimization for cpu cache.
+        if (i<item_count - _PREFETCH_STEP && ITEM_SAMPLE(job.finfo[i+_PREFETCH_STEP].index)) {
+            _mm_prefetch(iinfo + job.finfo[i+_PREFETCH_STEP].index, _PREFETCH_TYPE);
+        }
 
         if (!si.same) { 
             // set same_key as 
@@ -244,6 +255,7 @@ void* __worker_layer_processor(void* input) {
         }
         nod.temp_sum += iinfo[ind].residual;
         nod.temp_ssum += iinfo[ind].residual * iinfo[ind].residual;
+        
         dim_id_sorted[ nod.grow++ ] = ind;
     } 
 
@@ -276,9 +288,11 @@ void* __worker_layer_processor(void* input) {
             master_tree[_R(n)].square_sum = node.square_sum - node.split_ssum;
 
             for (int i=job.tree[n].begin; i<job.tree[n].split; ++i) {
+                _mm_prefetch(iinfo + dim_id_sorted[i+_PREFETCH_STEP_POST], _PREFETCH_TYPE);
                 iinfo[ dim_id_sorted[i] ].turn = 1;
             }
             for (int i=job.tree[n].split; i<job.tree[n].end; ++i) {
+                _mm_prefetch(iinfo + dim_id_sorted[i+_PREFETCH_STEP_POST], _PREFETCH_TYPE);
                 iinfo[ dim_id_sorted[i] ].turn = 2;
             }
 

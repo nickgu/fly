@@ -253,13 +253,18 @@ int main(int argc, char** argv) {
             test_data_reader->reset();
         }
 
-        FILE* output_fd = fopen(output_file, "w");
-        if (!output_fd) {
-            LOG_ERROR("Cannot open output file [%s] to write.", output_fd);
-            exit(-1);
+        FILE* output_fd = NULL;
+        if (output_file) {
+            output_fd = fopen(output_file, "w");
+            if (!output_fd) {
+                LOG_ERROR("Cannot open output file [%s] to write.", output_fd);
+                exit(-1);
+            }
         }
         test(test_data_reader, model, thread_num, output_fd);
-        fclose(output_fd);
+        if (output_fd) {
+            fclose(output_fd);
+        }
 
         if (!test_and_train_is_same) {
             delete test_data_reader;
