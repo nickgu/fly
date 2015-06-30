@@ -36,12 +36,14 @@ using namespace std;
 #define LOG_ERROR(format, ...) {fprintf(stderr, " ERROR: " format "\n", ##__VA_ARGS__);}
 #endif
 
+/*
 _syscall1(int, sysinfo, struct sysinfo*, info);
 size_t remain_memory() {
     struct sysinfo s_info;
     sysinfo(&s_info);
     return s_info.freeram;
 }
+*/
 
 namespace __hidden {
     static bool __g_debug_is_on__ = false;
