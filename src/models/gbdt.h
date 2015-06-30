@@ -133,8 +133,7 @@ struct SmallTreeNode_t {
 //#pragma pack(1)
 struct ItemInfo_t {
     float residual;
-    unsigned short in_which_node:14;
-    unsigned short turn:2;
+    unsigned short in_which_node;
 };
 //#pragma pack()
 
@@ -154,6 +153,8 @@ struct Job_LayerFeatureProcess_t {
 
     TreeNode_t*  master_tree;
     Lock_t*      locks;
+
+    int *dim_id_sorted;
 };
 
 /**
@@ -179,8 +180,8 @@ inline float __mid_mse_score(float la, int lc, float ra, int rc)
 }
 
 void* __worker_layer_processor(void* input) {
-#define _PREFETCH_STEP      (8)
-#define _PREFETCH_STEP_POST (8)
+#define _PREFETCH_STEP      (12)
+#define _PREFETCH_STEP_POST (12)
 #define _PREFETCH_TYPE (_MM_HINT_T1)
 
     Timer t_calc, t_post;
@@ -208,7 +209,7 @@ void* __worker_layer_processor(void* input) {
     uint32_t same_key = INVALID_SAME_KEY;
     ItemInfo_t* iinfo = job.iinfo;
     uint32_t item_count = job.item_count;
-    register int *dim_id_sorted = new int[item_count];
+    register int *dim_id_sorted = job.dim_id_sorted;
     TreeNode_t* master_tree = job.master_tree;
 
     uint32_t update_cnt = 0;
@@ -263,6 +264,7 @@ void* __worker_layer_processor(void* input) {
     t_post.begin();
 
     int update_node_counter = 0;
+    int update_node_set = 0;
     for (int n=job.beg_node; n<job.end_node; ++n) {
 
         TreeNode_t& node = job.tree[n];
@@ -287,32 +289,22 @@ void* __worker_layer_processor(void* input) {
             master_tree[_R(n)].sum = node.sum - node.split_sum;
             master_tree[_R(n)].square_sum = node.square_sum - node.split_ssum;
 
-            for (int i=job.tree[n].begin; i<job.tree[n].split; ++i) {
-                _mm_prefetch(iinfo + dim_id_sorted[i+_PREFETCH_STEP_POST], _PREFETCH_TYPE);
-                iinfo[ dim_id_sorted[i] ].turn = 1;
-            }
-            for (int i=job.tree[n].split; i<job.tree[n].end; ++i) {
-                _mm_prefetch(iinfo + dim_id_sorted[i+_PREFETCH_STEP_POST], _PREFETCH_TYPE);
-                iinfo[ dim_id_sorted[i] ].turn = 2;
-            }
-
             // end lock.
             job.locks[n].unlock();
         }
     }
     t_post.end();
 
-    LOG_DEBUG("Feature %d tm=%.2fs [%.2f+%.2f] update_node: %d update=%d/%d", 
+    LOG_DEBUG("Feature %d tm=%.2fs [%.2f+%.2f] update_node: %d(set=%d) update=%d/%d", 
             job.feature_index, 
             t_calc.cost_time() + t_post.cost_time(),
             t_calc.cost_time(),
             t_post.cost_time(),
             update_node_counter,
+            update_node_set,
             update_cnt, update_try
             );
 
-    // only lock in above section.
-    delete [] dim_id_sorted;
     pthread_exit(0);
 }
 
@@ -797,7 +789,6 @@ class GBDT_t
                 size_t sample_item_count = 0;
                 for (size_t i=0; i<_item_count; ++i) {
                     iinfo[i].in_which_node = 0;
-                    iinfo[i].turn = 0;
                     if ( ITEM_SAMPLE(i) ) {
                         sample_item_count += 1;
                         root.sum += iinfo[i].residual;
@@ -831,7 +822,8 @@ class GBDT_t
                     for (int D=0; D<_dim_count; ++D) {
                         // sample features.
                         jobs[D].selected = false;
-                        
+                        jobs[D].dim_id_sorted = NULL;
+
                         if (_feature_mask.find(D)!=_feature_mask.end()) {
                             continue;
                         }
@@ -849,6 +841,7 @@ class GBDT_t
                             jobs[D].all_node_count = all_node_count;
                             jobs[D].finfo = _sorted_fields[D];
                             jobs[D].iinfo = iinfo;
+                            jobs[D].dim_id_sorted = new int [sample_item_count];
                             memcpy(jobs[D].tree, _trees[T], _tree_size * sizeof(TreeNode_t));
 
                             selected_feature_count ++;
@@ -859,6 +852,23 @@ class GBDT_t
                     multi_tm.end();
 
                     post_tm.begin();
+
+                    for (int n=beg_node; n<end_node; ++n) {
+                        if (_trees[T][n].fidx >= 0) {
+                            int fidx = _trees[T][n].fidx;
+                            int* dim_id_sorted = jobs[fidx].dim_id_sorted;
+                            for (int i=_trees[T][n].begin; i<_trees[T][n].split; ++i) {
+                                _mm_prefetch(iinfo + dim_id_sorted[i+_PREFETCH_STEP_POST], _PREFETCH_TYPE);
+                                iinfo[ dim_id_sorted[i] ].in_which_node = _L(n);
+                            }
+                            for (int i=_trees[T][n].split; i<_trees[T][n].end; ++i) {
+                                _mm_prefetch(iinfo + dim_id_sorted[i+_PREFETCH_STEP_POST], _PREFETCH_TYPE);
+                                iinfo[ dim_id_sorted[i] ].in_which_node = _R(n);
+                            }
+                        }
+                    }
+
+
                     for (int i=beg_node; i<end_node; ++i) {
                         if (_trees[T][i].fidx>=0) {
                             // accumlulate the score to the feature weight.
@@ -869,14 +879,13 @@ class GBDT_t
                             }
                         }
                     }
-                    for (size_t i=0; i<_item_count; ++i) {
-                        if (iinfo[i].turn == 1) {
-                            iinfo[i].in_which_node = _L(iinfo[i].in_which_node);
-                        } else if (iinfo[i].turn == 2) {
-                            iinfo[i].in_which_node = _R(iinfo[i].in_which_node);
+
+                    for (int D=0; D<_dim_count; ++D) {
+                        if (jobs[D].dim_id_sorted) {
+                            delete [] jobs[D].dim_id_sorted;
                         }
-                        iinfo[i].turn = 0;
                     }
+
                     post_tm.end();
 
                     float total_tm = multi_tm.cost_time() + post_tm.cost_time();
