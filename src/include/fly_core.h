@@ -54,13 +54,13 @@ struct Instance_t {
         split(line, sep, flds);
 
         char* end_ptr;
-        float f = strtol(flds[0].c_str(), &end_ptr, 10);
+        float f = strtod(flds[0].c_str(), &end_ptr);
         label = int(f+0.5);
         features.clear();
         for (size_t i=1; i<flds.size(); ++i) {
             IndValue_t iv;
             iv.index = i;
-            iv.value = strtol(flds[i].c_str(), &end_ptr, 10);
+            iv.value = strtod(flds[i].c_str(), &end_ptr);
             features.push_back(iv);
         }
         return true;
