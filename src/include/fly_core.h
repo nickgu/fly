@@ -46,7 +46,31 @@ struct Instance_t {
         fprintf(stream, "\n");
     }
 
+    bool parse_item_no_index(char* line, const char* sep=" ") {
+        if (*line == 0) {
+            return false;
+        }
+        vector<string> flds;
+        split(line, sep, flds);
+
+        char* end_ptr;
+        float f = strtol(flds[0].c_str(), &end_ptr, 10);
+        label = int(f+0.5);
+        features.clear();
+        for (size_t i=1; i<flds.size(); ++i) {
+            IndValue_t iv;
+            iv.index = i;
+            iv.value = strtol(flds[i].c_str(), &end_ptr, 10);
+            features.push_back(iv);
+        }
+        return true;
+    }
+
     bool parse_item(char *line) {
+        if (*line == 0) {
+            return false;
+        }
+
         char* end_ptr;
         label = strtod(line, &end_ptr);
         if (end_ptr == line) {
@@ -147,7 +171,7 @@ class BinaryFileIO_t {
         BinaryFileIO_t() {}
         ~BinaryFileIO_t() {}
 
-        void transform(const char* input_file, const char* output_file) {
+        void transform(const char* input_file, const char* output_file, bool no_index_format, const char* seperator) {
             FILE* stream = fopen(input_file, "r");
             FILE* output_stream = fopen(output_file, "wb");
             if (stream == NULL) {
@@ -165,7 +189,15 @@ class BinaryFileIO_t {
             // load all data into memory.
             while (fgets(_line_buffer, sizeof(_line_buffer), stream)) {
                 Instance_t new_item;
-                new_item.parse_item(_line_buffer);
+                bool ret = false;
+                if (no_index_format) {
+                    ret = new_item.parse_item_no_index(_line_buffer, seperator);
+                } else {
+                    ret = new_item.parse_item(_line_buffer);
+                }
+                if (!ret) {
+                    continue;
+                }
                 new_item.write_binary(output_stream);
 
                 size_t process_size = ftell(stream);
@@ -316,7 +348,8 @@ class FeatureReader_t
             _roll_size(roll_size),
             _cur_id(0),
             _theta_num(0),
-            _buffer(8192)
+            _buffer(8192),
+            _no_index_format(false)
         {
             if (filename != NULL) {
                 set(filename);
@@ -327,6 +360,10 @@ class FeatureReader_t
             if (_stream) {
                 fclose(_stream);
             }
+        }
+
+        void set_no_index(bool b) {
+            _no_index_format = b;
         }
 
         virtual size_t size() const { return _buffer.size(); }
@@ -357,7 +394,11 @@ class FeatureReader_t
             size_t c = 0;
             while (fgets(line, sizeof(line), _stream)) {
                 Instance_t new_item;
-                new_item.parse_item(line);
+                if (_no_index_format) {
+                    new_item.parse_item_no_index(line);
+                } else {
+                    new_item.parse_item(line);
+                }
                 _buffer.push_back(new_item);
 
                 for (size_t i=0; i<new_item.features.size(); ++i) {   
@@ -407,6 +448,8 @@ class FeatureReader_t
 
         int     _theta_num;
         FArray_t<Instance_t> _buffer;
+
+        bool    _no_index_format;
 };
 
 

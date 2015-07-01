@@ -28,6 +28,7 @@ void show_help() {
         -L --load      : load model from file \n\
         -M --model     : [lr, cglr, mnn, gbdt] is available, default is lr. \n\
         -o --output    : output file, output the predict result of input training data. \n\
+        -N --no_index  : text input with no input. default seperator is ' ' (space)\n\
         -c --config    : configs. \n\
                             use -S [default=fly] to config Fly itself. \n\
                             use -s [default=modelname] to config model infomation. \n\
@@ -43,7 +44,7 @@ int main(int argc, char** argv) {
     srand((int)time(0));
 
     int opt;
-    char* opt_string = "dS:L:hHf:M:o:c:s:t:bT:p:";
+    char* opt_string = "dS:L:hHf:M:o:c:s:t:bT:p:N";
     static struct option long_options[] = {
         {"file", required_argument, NULL, 'f'},
         {"load", required_argument, NULL, 'L'},
@@ -58,6 +59,7 @@ int main(int argc, char** argv) {
         {"test", required_argument, NULL, 'T'},
         {"pipes", required_argument, NULL, 'p'},
         {"debug", required_argument, NULL, 'd'},
+        {"no_index", required_argument, NULL, 'N'},
         {0, 0, 0, 0}
     };
 
@@ -72,6 +74,7 @@ int main(int argc, char** argv) {
     Config_t model_config;
     const char* config_section = NULL;
     int thread_num = 5;
+    bool no_index = false;
     while ( (opt=getopt_long(argc, argv, opt_string, long_options, NULL))!=-1 ) {
         switch (opt) {
             case 'd':
@@ -134,6 +137,11 @@ int main(int argc, char** argv) {
                 LOG_NOTICE("global-pipes: %d", thread_num);
                 break;
 
+            case 'N':
+                no_index = true;
+                LOG_NOTICE("text input with no index.");
+                break;
+
             case 'h':
             case 'H':
                 show_help();
@@ -148,7 +156,7 @@ int main(int argc, char** argv) {
 
     if (output_binary_file != NULL) {
         BinaryFileIO_t io;
-        io.transform(input_file, output_binary_file);
+        io.transform(input_file, output_binary_file, no_index, " ");
         LOG_NOTICE("Complete file transform. program exits.");
         return 0;
     }
@@ -201,6 +209,9 @@ int main(int argc, char** argv) {
         if (input_file) {
             train_data_reader = new FeatureReader_t();
             train_data_reader->set(input_file);
+            if (no_index) {
+                ((FeatureReader_t*)train_data_reader)->set_no_index(true);
+            }
         }
         if (test_file) {
             if (test_and_train_is_same) {
