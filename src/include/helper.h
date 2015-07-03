@@ -11,6 +11,7 @@
 #include <string>
 #include <stdexcept>
 
+
 #include <cstdio>
 #include <sys/time.h>
 
@@ -23,6 +24,9 @@ using namespace std;
 
 #include <linux/unistd.h>
 #include <linux/kernel.h>
+
+#include <stdint.h>
+#include <signal.h>
 
 #ifndef LOG_DEBUG
 #define LOG_DEBUG(format, ...) {if (__hidden::is_debug_on()) fprintf(stderr, "DEBUG: " format "\n", ##__VA_ARGS__);}
