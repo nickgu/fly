@@ -476,11 +476,11 @@ class GBDT_t
                 float* buffer=NULL) const 
         {
             float ret = 0.0f;
-            // bad performance.
-            float *predict_buffer = new float [_dim_count];
+            float *predict_buffer = NULL;
             if (buffer) {
                 predict_buffer = buffer;
             } else {
+                // bad performance.
                 predict_buffer = new float[_dim_count];
             }
 

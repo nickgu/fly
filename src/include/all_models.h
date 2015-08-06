@@ -12,12 +12,13 @@
 
 //#include "models/linear.h"
 #include "logit.h"
-#include "logit_cg.h"
 
 #include "mnn.h"
 #include "gbdt.h"
 
 #include "knn.h"
+
+
 #include "meta.h"
 
 #endif  //__ALL_MODELS_H_
