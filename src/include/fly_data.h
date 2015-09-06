@@ -23,6 +23,318 @@ using namespace __gnu_cxx;
 
 #include "helper.h"
 
+struct IndValue_t {
+    int index;
+    float value;
+
+    IndValue_t() {}
+    IndValue_t(int ind, float val) :
+        index(ind),
+        value(val)
+    {}
+};
+
+struct Instance_t {
+    float label;
+    FArray_t<IndValue_t> features;
+
+    Instance_t(int feature_extend_size=32):
+        features(feature_extend_size)
+    {}
+
+    void write(FILE* stream) const {
+        fprintf(stream, "%f", label);
+        for (size_t i=0; i<features.size(); ++i) {
+            fprintf(stream, " %d:%f", features[i].index, features[i].value);
+        }
+        fprintf(stream, "\n");
+    }
+
+    bool parse_item(char *line) {
+        if (*line == 0) {
+            return false;
+        }
+
+        char* end_ptr;
+        label = strtod(line, &end_ptr);
+        if (end_ptr == line) {
+            LOG_ERROR("parse_item() failed: label_parse: [%s]", end_ptr);
+            return false;
+        }
+        features.clear();
+
+        size_t begin = 0;
+        IndValue_t iv;
+        iv.index = -1;
+        bool index_illegal = false;
+        for (size_t i=0; line[i]; ++i) {
+            if (line[i] == ':') {
+                iv.index = strtol(line + begin, &end_ptr, 10);
+                if (end_ptr == line+begin) {
+                    LOG_ERROR("parse_item() failed: index_parse: [%s]", line+begin);
+                    return false;
+                }
+
+                begin = i+1;
+                index_illegal = true;
+            }
+            if (line[i] == ' ' || line[i] == '\t' || line[i]=='\n' || line[i]=='\r') {
+                if (!index_illegal) {
+                    begin = i + 1;
+                    continue;
+                }
+                iv.value = strtod(line + begin, &end_ptr);
+                if (end_ptr == line+begin || (end_ptr!=NULL && *end_ptr!=' ' && *end_ptr!='\n' && *end_ptr!='\t' && *end_ptr!='\r')) {
+                    LOG_ERROR("parse_item() failed: value_parse: index=%d [%s]", iv.index, line+begin);
+                    return false;
+                }
+
+                //LOG_NOTICE("%d:%f", iv.index, iv.value);
+                features.push_back(iv);
+                iv.index = -1;
+                index_illegal = false;
+                begin = i + 1;
+            }
+        }
+        return true;
+    }
+
+    /*
+     * write to binary file.
+     * return offset of file.
+     */
+    size_t write_binary(FILE* stream) {
+        size_t offset = ftell(stream);
+        fwrite(&label, 1, sizeof(label), stream);
+        features.write(stream);
+        return offset;
+    }
+
+    void read_binary(FILE* stream) {
+        fread(&label, 1, sizeof(label), stream);
+        features.read(stream);
+        return ;
+    }
+};
+
+/*
+ * compact-feature instance.
+ * values is feature buffer. and dim info is not maintained in structure.
+ * values will not be changed between its lifetime.
+ */
+struct CompactInstance_t {
+    float label;
+    float *values;
+    size_t dim;
+
+    CompactInstance_t(size_t d=0) {
+        label = 0;
+        dim = d;
+        if (d<=0) {
+            values = NULL;
+        } else {
+            values = (float*)malloc(sizeof(float) * d);
+            memset(values, 0, sizeof(float)*d);
+        }
+    }
+    ~CompactInstance_t() {
+        if (values!=NULL) {
+            free(values);
+        }
+        values = NULL;
+        dim = 0;
+    }
+
+    CompactInstance_t(const CompactInstance_t& o) {
+        clear();
+        label = o.label;
+        dim = o.dim;
+        if (dim>0) {
+            values = (float*)malloc(sizeof(float) * dim);
+            memcpy(values, o.values, sizeof(float)*dim);
+        }
+    }
+
+    const CompactInstance_t& operator = (const CompactInstance_t& o) {
+        clear();
+        label = o.label;
+        dim = o.dim;
+        if (dim>0) {
+            values = (float*)malloc(sizeof(float) * dim);
+            memcpy(values, o.values, sizeof(float)*dim);
+        }
+        return *this;
+    }
+
+    void clear() {
+        if (values!=NULL) {
+            free(values);
+        }
+        values = NULL;
+        dim = 0;
+    }
+
+    void set_dim(size_t d) {
+        if (values!=NULL) {
+            free(values);
+        }
+        dim =d;
+        if (dim<=0) {
+            values = NULL;
+        } else {
+            values = (float*)malloc(sizeof(float) * dim);
+            memset(values, 0, sizeof(float)*dim);
+        }
+    }
+
+    void convert_to_instance(Instance_t* ins) {
+        if (values) {
+            ins->label = label;
+            ins->features.clear();
+            for (size_t i=0; i<dim; ++i) {
+                ins->features.push_back(IndValue_t(i, values[i]));
+            }
+        } else {
+            throw std::runtime_error("Want to convert raw CompactInstance_t to Instance_t");
+        }
+    }
+
+    size_t parse_item(char* line, const char* sep=" ") {
+        if (*line == 0) {
+            return 0;
+        }
+        vector<string> flds;
+        split(line, sep, flds);
+
+        char* end_ptr;
+        float f = strtod(flds[0].c_str(), &end_ptr);
+        label = int(f+0.5);
+        size_t d = flds.size()-1;
+        if (dim>0 && d!=dim) {
+            throw std::runtime_error("CompactValue parse failed! values not match in one line.");
+        }
+        if (values == NULL) {
+            set_dim(d);
+        }
+        for (size_t i=1; i<flds.size(); ++i) {
+            size_t ind = i-1;
+            values[ind] = strtod(flds[i].c_str(), &end_ptr);
+        }
+        return dim;
+    }
+};
+
+
+/*
+ * Interface of feature file reader.
+ */
+class IReader_t {
+    public:
+        virtual size_t size() const = 0;
+        virtual size_t processed_num() const = 0;
+        virtual size_t dim() const = 0;
+        virtual int percentage() const = 0;
+        virtual void set(const char* filename) = 0;
+
+        /**
+         *  reset the stream.
+         */
+        virtual void reset() = 0;
+
+        /**
+         *  usage:
+         *      TextReader_t r(stream);
+         *      Instance_t item;
+         *      while (reader.read(&item)) {
+         *          // do what you need to do.
+         *      }
+         */ 
+        virtual bool read(Instance_t* item) = 0;
+};
+
+class BinaryReader_t 
+    : public IReader_t
+{
+    public:
+        BinaryReader_t(const char* filename=NULL);
+        virtual ~BinaryReader_t();
+        virtual size_t size() const;
+        virtual size_t processed_num() const { return _cur_id; }
+        virtual size_t dim() const;
+        virtual int percentage() const;
+        virtual void set(const char* filename);
+        void stat();
+        virtual void reset();
+        virtual bool read(Instance_t* item);
+
+    private:
+        FILE*   _stream;
+        size_t  _cur_id;
+        size_t  _size;  // total record num.
+        int     _theta_num;
+        bool    _is_stat;
+};
+
+/**
+ *  Feature file reader.
+ */
+class TextReader_t 
+    : public IReader_t
+{
+    public:
+        enum TextFeatureMode_t {
+            TFM_AutoDetected = 0,
+            TFM_IndValue,
+            TFM_Values,
+            TFM_Ind_1,
+        };
+
+        TextReader_t(const char* filename=NULL, size_t roll_size=5000);
+        virtual ~TextReader_t();
+
+        virtual size_t processed_num() const { return _cur_id; }
+        virtual size_t dim() const {return _theta_num;}
+
+        virtual size_t size() const;
+        virtual int percentage() const;
+
+        TextFeatureMode_t feature_mode() const {
+            return _feature_mode;
+        }
+        void set_feature_mode(TextFeatureMode_t mode) {
+            _feature_mode = mode;
+        }
+
+        virtual void set(const char* filename);
+        virtual void reset();
+        virtual bool read(Instance_t* item);
+
+        static TextFeatureMode_t auto_detect_mode(const char* line);
+
+    private:
+        static const size_t MaxLineLength = 40960;
+
+        FILE*   _stream;
+        size_t  _roll_size;
+        size_t  _cur_id;
+
+        int     _theta_num;
+
+        /*
+         * Two types of instance.
+         *  1. ind-value. (Instance_t)
+         *  2. value-buffer. (CompactInstance_t)
+         */
+        TextFeatureMode_t    _feature_mode;
+        FArray_t<Instance_t> _buffer;
+        FArray_t<CompactInstance_t> _compact_buffer;
+
+        bool __use_buffer() const {
+            return _feature_mode != TFM_Values;
+        }
+
+};
+
 /*
  * feature type 
  * and corresponding binary file storage method:
@@ -106,141 +418,6 @@ class FileMeta_t {
 };
 #endif
 
-struct IndValue_t {
-    int index;
-    float value;
-};
-
-struct Instance_t {
-    float label;
-    FArray_t<IndValue_t> features;
-
-    Instance_t(int feature_extend_size=32):
-        features(feature_extend_size)
-    {}
-
-    void write(FILE* stream) const {
-        fprintf(stream, "%f", label);
-        for (size_t i=0; i<features.size(); ++i) {
-            fprintf(stream, " %d:%f", features[i].index, features[i].value);
-        }
-        fprintf(stream, "\n");
-    }
-
-    bool parse_item_no_index(char* line, const char* sep=" ") {
-        if (*line == 0) {
-            return false;
-        }
-        vector<string> flds;
-        split(line, sep, flds);
-
-        char* end_ptr;
-        float f = strtod(flds[0].c_str(), &end_ptr);
-        label = int(f+0.5);
-        features.clear();
-        for (size_t i=1; i<flds.size(); ++i) {
-            IndValue_t iv;
-            iv.index = i;
-            iv.value = strtod(flds[i].c_str(), &end_ptr);
-            features.push_back(iv);
-        }
-        return true;
-    }
-
-    bool parse_item(char *line) {
-        if (*line == 0) {
-            return false;
-        }
-
-        char* end_ptr;
-        label = strtod(line, &end_ptr);
-        if (end_ptr == line) {
-            LOG_ERROR("parse_item() failed: label_parse: [%s]", end_ptr);
-            return false;
-        }
-        features.clear();
-
-        size_t begin = 0;
-        IndValue_t iv;
-        iv.index = -1;
-        bool index_illegal = false;
-        for (size_t i=0; line[i]; ++i) {
-            if (line[i] == ':') {
-                iv.index = strtol(line + begin, &end_ptr, 10);
-                if (end_ptr == line+begin) {
-                    LOG_ERROR("parse_item() failed: index_parse: [%s]", line+begin);
-                    return false;
-                }
-
-                begin = i+1;
-                index_illegal = true;
-            }
-            if (line[i] == ' ' || line[i] == '\t' || line[i]=='\n' || line[i]=='\r') {
-                if (!index_illegal) {
-                    begin = i + 1;
-                    continue;
-                }
-                iv.value = strtod(line + begin, &end_ptr);
-                if (end_ptr == line+begin || (end_ptr!=NULL && *end_ptr!=' ' && *end_ptr!='\n' && *end_ptr!='\t' && *end_ptr!='\r')) {
-                    LOG_ERROR("parse_item() failed: value_parse: index=%d [%s]", iv.index, line+begin);
-                    return false;
-                }
-
-                //LOG_NOTICE("%d:%f", iv.index, iv.value);
-                features.push_back(iv);
-                iv.index = -1;
-                index_illegal = false;
-                begin = i + 1;
-            }
-        }
-        return true;
-    }
-
-    /*
-     * write to binary file.
-     * return offset of file.
-     */
-    size_t write_binary(FILE* stream) {
-        size_t offset = ftell(stream);
-        fwrite(&label, 1, sizeof(label), stream);
-        features.write(stream);
-        return offset;
-    }
-
-    void read_binary(FILE* stream) {
-        fread(&label, 1, sizeof(label), stream);
-        features.read(stream);
-        return ;
-    }
-};
-
-
-/*
- * Interface of feature file reader.
- */
-class IReader_t {
-    public:
-        virtual size_t size() const = 0;
-        virtual size_t processed_num() const = 0;
-        virtual size_t dim() const = 0;
-        virtual int percentage() const = 0;
-        virtual void set(const char* filename) = 0;
-
-        /**
-         *  reset the stream.
-         */
-        virtual void reset() = 0;
-
-        /**
-         *  usage:
-         *      TextReader_t r(stream);
-         *      Instance_t item;
-         *      while (reader.read(&item)) {
-         *          // do what you need to do.
-         *      }
-         */ 
-        virtual bool read(Instance_t* item) = 0;
-};
 
 #if 0
 class DenseReader_t:
@@ -276,239 +453,6 @@ class DenseReader_t:
         virtual bool read(Instance_t* item) = 0;
 };
 #endif
-
-class BinaryReader_t 
-    : public IReader_t
-{
-    public:
-        BinaryReader_t(const char* filename=NULL):
-            _cur_id(0),
-            _size(0),
-            _theta_num(0)
-        {
-            if (filename != NULL) {
-                set(filename);
-            }
-        }
-
-        virtual ~BinaryReader_t() {
-            if (_stream) {
-                fclose(_stream);
-            }
-        }
-
-        virtual size_t size() const { 
-            if (!_is_stat) {
-                throw std::runtime_error("Access size or dim before stat.");
-            }
-            return _size; 
-        }
-        virtual size_t processed_num() const { return _cur_id; }
-        virtual size_t dim() const {
-            if (!_is_stat) {
-                throw std::runtime_error("Access size or dim before stat.");
-            }
-            return _theta_num;
-        }
-        virtual int percentage() const {
-            return int(_cur_id * 100.0f / _size);
-        }
-
-        virtual void set(const char* filename) {
-            _is_stat = false;
-            LOG_NOTICE("BinaryReader open [%s]", filename);
-            _stream = fopen(filename, "rb");
-            if (_stream == NULL) {
-                throw std::runtime_error(string("Cannot open file : ") + string(filename));
-            }
-
-            if (strcmp(filename, "/dev/stdin") != 0) {
-                stat();
-            } else {
-                LOG_NOTICE("Input is /dev/stdin. Streming ignore stat.");
-            }
-        }
-
-        void stat() {
-            if (_is_stat) {
-                return ;
-            }
-            _is_stat = true;
-            LOG_NOTICE("DO_STAT ON BINARY FILE.");
-            fseek(_stream, 0, SEEK_END);
-            size_t total_file_size = ftell(_stream);
-            int percentage = 0;
-
-            _cur_id = 0;
-            _size = 0;
-            _theta_num = 0;
-            LOG_NOTICE("Preprocess(Stat theta_num and item_num)..");
-            fseek(_stream, 0, SEEK_SET);
-            while ( !feof(_stream) ) {
-                Instance_t new_item;
-                new_item.read_binary(_stream);
-
-                // stat _size and _theta_num
-                _size ++;
-                for (size_t i=0; i<new_item.features.size(); ++i) {   
-                    int idx = new_item.features[i].index;
-                    if (idx >= _theta_num) {
-                        _theta_num = idx + 1;
-                    }
-                }
-
-                size_t process_size = ftell(_stream);
-                int cur_per = int(process_size * 100.0f / total_file_size);
-                if (cur_per > percentage) {
-                    percentage = cur_per;
-                    fprintf(stderr, "%cPreprocessing complete %d%% [%d/%d mb] [%lu record(s)]", 
-                            13, percentage, process_size>>20, total_file_size>>20, _size);
-                    fflush(stderr);
-                }
-            }
-            fprintf(stderr, "\n");
-            LOG_NOTICE("processed: %llu records. theta_num=%d", _size, _theta_num);
-            reset();
-        }
-
-        virtual void reset() {
-            fseek(_stream, 0, SEEK_SET);
-            _cur_id = 0;
-        }
-
-        virtual bool read(Instance_t* item) {
-            if ( !feof(_stream) ) {
-                item->read_binary(_stream);
-                _cur_id ++;
-                return true;
-            } else {
-                return false;
-            }
-        }
-
-    private:
-        FILE*   _stream;
-        size_t  _cur_id;
-        size_t  _size;  // total record num.
-        int     _theta_num;
-        bool    _is_stat;
-};
-
-/**
- *  Feature file reader.
- */
-class TextReader_t 
-    : public IReader_t
-{
-    public:
-        TextReader_t(const char* filename=NULL, size_t roll_size=5000):
-            _roll_size(roll_size),
-            _cur_id(0),
-            _theta_num(0),
-            _buffer(8192),
-            _no_index_format(false)
-        {
-            if (filename != NULL) {
-                set(filename);
-            }
-        }
-
-        virtual ~TextReader_t() {
-            if (_stream) {
-                fclose(_stream);
-            }
-        }
-
-        void set_no_index(bool b) {
-            _no_index_format = b;
-        }
-
-        virtual size_t size() const { return _buffer.size(); }
-        virtual size_t processed_num() const { return _cur_id; }
-        virtual size_t dim() const {return _theta_num;}
-        virtual int percentage() const {
-            return int(_cur_id * 100.0f / _buffer.size());
-        }
-
-        virtual void set(const char* filename) {
-            LOG_NOTICE("TextFeatureReader open [%s]", filename);
-            //_preprocess = preprocess;
-            _stream = fopen(filename, "r");
-            if (_stream == NULL) {
-                throw std::runtime_error(string("Cannot open file : ") + string(filename));
-            }
-
-            fseek(_stream, 0, SEEK_END);
-            size_t total_file_size = ftell(_stream);
-            fseek(_stream, 0, SEEK_SET);
-            int percentage = 0;
-
-            // load all data into memory.
-            _cur_id = 0;
-            _buffer.clear();
-            _theta_num = 0;
-            char line[MaxLineLength];
-            size_t c = 0;
-            while (fgets(line, sizeof(line), _stream)) {
-                Instance_t new_item;
-                if (_no_index_format) {
-                    new_item.parse_item_no_index(line);
-                } else {
-                    new_item.parse_item(line);
-                }
-                _buffer.push_back(new_item);
-
-                for (size_t i=0; i<new_item.features.size(); ++i) {   
-                    int idx = new_item.features[i].index;
-                    if (idx >= _theta_num) {
-                        _theta_num = idx + 1;
-                    }
-                }
-
-                c++;
-                size_t process_size = ftell(_stream);
-                int cur_per = int(process_size * 100.0f / total_file_size);
-                if (cur_per > percentage) {
-                    percentage = cur_per;
-                    fprintf(stderr, "%cLoading complete %d%% (%d/%d kb)", 
-                            13, percentage, process_size/1024, total_file_size/1024);
-                    fflush(stderr);
-                }
-            }
-            fprintf(stderr, "\n");
-            LOG_NOTICE("record_num=%d, dim=%d", c, _theta_num);
-            fclose(_stream);
-            _stream = NULL;
-        }
-
-        virtual void reset() {
-            //fseek(_stream, 0, SEEK_SET);
-            _cur_id = 0;
-        }
-
-        virtual bool read(Instance_t* item) {
-            if (_cur_id >= _buffer.size()) {
-                // read none.
-                return false;
-            }
-
-            *item = _buffer[_cur_id ++];
-            return true;
-        }
-
-    private:
-        static const size_t MaxLineLength = 40960;
-
-        FILE*   _stream;
-        size_t  _roll_size;
-        size_t  _cur_id;
-
-        int     _theta_num;
-        FArray_t<Instance_t> _buffer;
-
-        bool    _no_index_format;
-};
-
 
 #endif  //__FLY_DATA_H_
 

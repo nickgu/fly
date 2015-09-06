@@ -40,7 +40,7 @@ class BinaryFileIO_t {
         BinaryFileIO_t() {}
         ~BinaryFileIO_t() {}
 
-        void transform(const char* input_file, const char* output_file, bool no_index_format, const char* seperator) {
+        void transform(const char* input_file, const char* output_file, const char* seperator, TextReader_t::TextFeatureMode_t text_mode = TextReader_t::TFM_AutoDetected) {
             FILE* stream = fopen(input_file, "r");
             FILE* output_stream = fopen(output_file, "wb");
             if (stream == NULL) {
@@ -54,18 +54,32 @@ class BinaryFileIO_t {
             size_t total_file_size = ftell(stream);
             fseek(stream, 0, SEEK_SET);
             int percentage = 0;
+            size_t theta_num = 0;
+
+            Instance_t new_item;
+            CompactInstance_t compact_item(0);
 
             // load all data into memory.
             while (fgets(_line_buffer, sizeof(_line_buffer), stream)) {
-                Instance_t new_item;
                 bool ret = false;
-                if (no_index_format) {
-                    ret = new_item.parse_item_no_index(_line_buffer, seperator);
-                } else {
-                    ret = new_item.parse_item(_line_buffer);
+
+                if (text_mode == TextReader_t::TFM_AutoDetected) {
+                    text_mode = TextReader_t::auto_detect_mode(_line_buffer);
                 }
-                if (!ret) {
-                    continue;
+
+                if (text_mode == TextReader_t::TFM_IndValue) {
+                    ret = new_item.parse_item(_line_buffer);
+                    if (!ret) {
+                        continue;
+                    }
+
+                } else if (text_mode == TextReader_t::TFM_Values) {
+                    size_t s = compact_item.parse_item(_line_buffer, " ");
+                    if (theta_num==0) {
+                        theta_num = s;
+                        LOG_NOTICE("ModeValues : read first line and get theta_num = %d", theta_num);
+                    }
+                    compact_item.convert_to_instance(&new_item);
                 }
                 new_item.write_binary(output_stream);
 

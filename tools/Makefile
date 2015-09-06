@@ -7,6 +7,8 @@ DEBUG_CPPFLAGS =  -D__VERSION_ID__="\"$(VERSION)\"" -g -Wall -O0 -fPIC  -pipe -D
 
 TARGET=auc test_gbdt binary_feature_less PyFly.so
 
+OBJECTS= ../src/*.o
+
 INCLUDES= -I../src/include\
 		  -I../src/models
 
@@ -20,27 +22,19 @@ all: clean $(TARGET)
 	mkdir tools
 	mv $(TARGET) tools
 
-fly: fly.cc
-	@echo 'MAKE: FLY'
-	$(COMPILER) $^ -o $@ $(LIBS) $(CPPFLAGS) $(INCLUDES) 
-
-fly_debug: fly.cc
-	@echo 'MAKE: FLY_DEBUG'
-	$(COMPILER) $^ -o $@ $(LIBS) $(DEBUG_CPPFLAGS) $(INCLUDES) 
-
-test_gbdt: test_gbdt.cc
+test_gbdt: test_gbdt.cc $(OBJECTS)
 	@echo 'MAKE: TEST_GBDT'
 	$(COMPILER) $^ -o $@ $(LIBS) $(CPPFLAGS) $(INCLUDES) 
 
-binary_feature_less: binary_feature_less.cc
+binary_feature_less: binary_feature_less.cc $(OBJECTS)
 	@echo 'MAKE: BINARY_FEATURE_LESS'
 	$(COMPILER) $^ -o $@ $(LIBS) $(CPPFLAGS) $(INCLUDES) 
 
-auc: auc.cc
+auc: auc.cc $(OBJECTS)
 	@echo 'MAKE: AUC'
 	$(COMPILER) $^ -o $@ $(LIBS) $(CPPFLAGS) $(INCLUDES) 
 
-PyFly.so: pyfly.cc
+PyFly.so: pyfly.cc $(OBJECTS)
 	$(COMPILER) -fpic $^ -shared -o $@ $(INCLUDES) $(PYTHON27_INCLUDE) $(LIBS) $(CPPFLAGS) 
 
 clean:

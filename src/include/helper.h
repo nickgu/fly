@@ -52,11 +52,11 @@ size_t remain_memory() {
 namespace __hidden {
     static bool __g_debug_is_on__ = false;
 
-    bool is_debug_on() {
+    inline bool is_debug_on() {
         return __g_debug_is_on__;
     }
 
-    void set_debug(bool b) {
+    inline void set_debug(bool b) {
         __g_debug_is_on__ = b;
     }
 };
@@ -198,7 +198,7 @@ class FArray_t {
         }
 };
 
-void split(char* s, const char* token, std::vector<std::string>& out) {
+inline void split(char* s, const char* token, std::vector<std::string>& out) {
     char* p;
     out.clear();
     char* f = strtok_r(s, token, &p);
