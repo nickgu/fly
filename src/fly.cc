@@ -205,17 +205,17 @@ int main(int argc, char** argv) {
 
     } else {
         if (input_file) {
-            train_data_reader = new FeatureReader_t();
+            train_data_reader = new TextReader_t();
             train_data_reader->set(input_file);
             if (no_index) {
-                ((FeatureReader_t*)train_data_reader)->set_no_index(true);
+                ((TextReader_t*)train_data_reader)->set_no_index(true);
             }
         }
         if (test_file) {
             if (test_and_train_is_same) {
                 test_data_reader = train_data_reader;
             } else {
-                test_data_reader = new FeatureReader_t();
+                test_data_reader = new TextReader_t();
                 test_data_reader->set(test_file);
             }
         }

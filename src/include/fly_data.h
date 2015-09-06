@@ -1,11 +1,3 @@
-/***************************************************************************
- * 
- * Copyright (c) 2015 Baidu.com, Inc. All Rights Reserved
- * 
- **************************************************************************/
- 
- 
- 
 /**
  * @file fly_data.h
  * @author gusimiu(com@baidu.com)
@@ -241,7 +233,7 @@ class IReader_t {
 
         /**
          *  usage:
-         *      FeatureReader_t r(stream);
+         *      TextReader_t r(stream);
          *      Instance_t item;
          *      while (reader.read(&item)) {
          *          // do what you need to do.
@@ -275,7 +267,7 @@ class DenseReader_t:
 
         /**
          *  usage:
-         *      FeatureReader_t r(stream);
+         *      TextReader_t r(stream);
          *      Instance_t item;
          *      while (reader.read(&item)) {
          *          // do what you need to do.
@@ -405,11 +397,11 @@ class BinaryFeatureReader_t
 /**
  *  Feature file reader.
  */
-class FeatureReader_t 
+class TextReader_t 
     : public IReader_t
 {
     public:
-        FeatureReader_t(const char* filename=NULL, size_t roll_size=5000):
+        TextReader_t(const char* filename=NULL, size_t roll_size=5000):
             _roll_size(roll_size),
             _cur_id(0),
             _theta_num(0),
@@ -421,7 +413,7 @@ class FeatureReader_t
             }
         }
 
-        virtual ~FeatureReader_t() {
+        virtual ~TextReader_t() {
             if (_stream) {
                 fclose(_stream);
             }

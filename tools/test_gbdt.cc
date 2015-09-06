@@ -20,7 +20,7 @@
 struct TestJob_t {
     int job_id;
     PCPool_t<Instance_t>* pool;
-    FlyReader_t* reader;
+    IReader_t* reader;
     FArray_t<ResultPair_t> ans_list;
     GBDT_t* model;
 
@@ -102,7 +102,7 @@ void* thread_test(void* c) {
     return NULL;
 }
 
-float test_auc(FlyReader_t* treader, GBDT_t* model, FILE* dump_feature_binary_file, bool output_mean, bool output_path, int thread_num) {
+float test_auc(IReader_t* treader, GBDT_t* model, FILE* dump_feature_binary_file, bool output_mean, bool output_path, int thread_num) {
     // 1 reader + N workers.
     thread_num += 1;
     TestJob_t* jobs = new TestJob_t[thread_num];
@@ -202,8 +202,8 @@ int main(int argc, char** argv) {
     const char* model_name = argv[1];
     const char* test_file_name = argv[2];
 
-    FlyReader_t* test_data_reader  = NULL;
-    test_data_reader = new FeatureReader_t(test_file_name);
+    IReader_t* test_data_reader  = NULL;
+    test_data_reader = new TextReader_t(test_file_name);
     Config_t nil_config;
     GBDT_t *model = new GBDT_t(nil_config, "");
 
@@ -212,7 +212,7 @@ int main(int argc, char** argv) {
     fclose(model_file);
  
     // simple test on training set.
-    FlyReader_t *treader = test_data_reader;
+    IReader_t *treader = test_data_reader;
     float auc = 0;
     if (test_interval>0) {
         for (int T=test_interval; T<=test_count; T+=test_interval) {

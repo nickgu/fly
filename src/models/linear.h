@@ -58,7 +58,7 @@ class LinearRegression_t
             }
         }
 
-        virtual void init(FeatureReader_t& reader) {
+        virtual void init(TextReader_t& reader) {
             _reader = reader;
             _reader.reset();
             // stat the max dim id.
@@ -130,7 +130,7 @@ class LinearRegression_t
         float   _learn_rate;
         float   _min_loss;
 
-        FeatureReader_t _reader;
+        TextReader_t _reader;
 
         /**
          *  input:

@@ -48,7 +48,7 @@ class MultiClassFakeReader_t
 
         /**
          *  usage:
-         *      FeatureReader_t r(stream);
+         *      TextReader_t r(stream);
          *      Instance_t item;
          *      while (reader.read(&item)) {
          *          // do what you need to do.
