@@ -27,7 +27,7 @@ class Updatable_t {
 struct JobUpdate_t {
     int job_id;
     PCPool_t<Instance_t>* pool;
-    FlyReader_t* reader;
+    IReader_t* reader;
     Updatable_t* updatable;
     double total_loss;
 };
@@ -61,7 +61,7 @@ class IterModel_t:
         virtual ~IterModel_t() 
         {}
 
-        virtual void init(FlyReader_t* reader) {
+        virtual void init(IReader_t* reader) {
             _reader = reader;
             _reader->reset();
         }
@@ -101,7 +101,7 @@ class IterModel_t:
         int     _thread_num;
 
         const Config_t*  _config;
-        FlyReader_t* _reader;
+        IReader_t* _reader;
         Timer _epoch_timer;
 
         virtual void _train_begin() {};

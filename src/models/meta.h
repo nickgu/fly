@@ -15,10 +15,10 @@
 #include "cfg.h"
 
 class MultiClassFakeReader_t 
-    : public FlyReader_t 
+    : public IReader_t 
 {
     public:
-        MultiClassFakeReader_t(FlyReader_t *reader, int class_id) {
+        MultiClassFakeReader_t(IReader_t *reader, int class_id) {
             _reader = reader;
             _class_id = class_id;
         }
@@ -67,7 +67,7 @@ class MultiClassFakeReader_t
         }
 
     private:
-        FlyReader_t* _reader;
+        IReader_t* _reader;
         int         _class_id;
 };
 
@@ -116,7 +116,7 @@ class MetaModel_t
             return best_class;
         }
 
-        virtual void init(FlyReader_t* reader) {
+        virtual void init(IReader_t* reader) {
             _fake_readers = new MultiClassFakeReader_t* [_class_num];
             for (int i=0; i<_class_num; ++i) {
                 _fake_readers[i] = new MultiClassFakeReader_t(reader, i);

@@ -37,11 +37,11 @@ using namespace __gnu_cxx;
  *      Feature_Normal: sizeof(float)
  *      Feature_Sparse: sizeof(uint32_t),sizeof(float)
  */
-enum FeatureType_t {
-    Feature_Normal = 0;  // normal feature, float type.
-    Feature_Sparse,      // index and value.
-    Feature_Binary,      // {0, 1}
-    Feature_SparseBinary // {0, 1} and the amount of 1 is very little.
+enum BinaryFeatureType_t {
+    BF_Normal = 0,  // normal feature, float type.
+    BF_Sparse,      // index and value.
+    BF_Binary,      // {0, 1}
+    BF_SparseBinary // {0, 1} and the amount of 1 is very little.
 };
 
 
@@ -223,7 +223,10 @@ struct Instance_t {
 };
 
 
-class FlyReader_t {
+/*
+ * Interface of feature file reader.
+ */
+class IReader_t {
     public:
         virtual size_t size() const = 0;
         virtual size_t processed_num() const = 0;
@@ -249,7 +252,7 @@ class FlyReader_t {
 
 #if 0
 class DenseReader_t:
-    FlyReader_t
+    IReader_t
 {
     public:
         virtual size_t size() const {
@@ -283,7 +286,7 @@ class DenseReader_t:
 #endif
 
 class BinaryFeatureReader_t 
-    : public FlyReader_t
+    : public IReader_t
 {
     public:
         BinaryFeatureReader_t(const char* filename=NULL):
@@ -403,7 +406,7 @@ class BinaryFeatureReader_t
  *  Feature file reader.
  */
 class FeatureReader_t 
-    : public FlyReader_t
+    : public IReader_t
 {
     public:
         FeatureReader_t(const char* filename=NULL, size_t roll_size=5000):

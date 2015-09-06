@@ -37,7 +37,7 @@ class MeanStdvar_Uniform {
             }
         }
 
-        void stat(FlyReader_t* reader) {
+        void stat(IReader_t* reader) {
             _dim_num = reader->dim();
             _min = new float[_dim_num];
             _max = new float[_dim_num];

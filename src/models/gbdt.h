@@ -578,7 +578,7 @@ class GBDT_t
             return ;
         }
 
-        virtual void  init(FlyReader_t* reader) {
+        virtual void  init(IReader_t* reader) {
             // construct column infomation.
             _reader = reader;
             _item_count = (unsigned)reader->size();
@@ -966,7 +966,7 @@ class GBDT_t
         size_t tree_node_count() const { return (1<< (_max_layer + 1)); }
 
     private:
-        FlyReader_t* _reader;
+        IReader_t* _reader;
 
         int         _tree_count;
         int         _max_layer;

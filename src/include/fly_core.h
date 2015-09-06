@@ -31,7 +31,7 @@ class FlyModel_t {
         virtual float predict(const Instance_t& ins) const = 0;
         virtual void  write_model(FILE* stream) const = 0;
         virtual void  read_model(FILE* stream) = 0;
-        virtual void  init(FlyReader_t* reader) = 0;
+        virtual void  init(IReader_t* reader) = 0;
         virtual void  train() = 0;
 };
 

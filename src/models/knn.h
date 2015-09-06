@@ -99,7 +99,7 @@ class KNNModel_t
             return best_ret;
         }
 
-        virtual void  init(FlyReader_t* reader) {
+        virtual void  init(IReader_t* reader) {
             _reader = reader;
         }
 
@@ -114,7 +114,7 @@ class KNNModel_t
 
     private:
         int             _k;
-        FlyReader_t*    _reader;
+        IReader_t*    _reader;
 
         float _calc_dist(const Instance_t& a, const Instance_t& b) const {
             float ret = 0;

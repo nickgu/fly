@@ -25,7 +25,7 @@ class MultiNN_t :
             LOG_NOTICE("Layer_width: %d", _layer_width);
         }
 
-        virtual void init(FlyReader_t* reader) {
+        virtual void init(IReader_t* reader) {
             // base process.
             IterModel_t::init(reader);
             _init_net(reader->dim(), _layer_num, _layer_width);

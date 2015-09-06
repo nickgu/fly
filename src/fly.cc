@@ -15,7 +15,7 @@
 
 #include "all_models.h"
 
-void test(FlyReader_t* treader, FlyModel_t* model, int thread_num, FILE* output_file);
+void test(IReader_t* treader, FlyModel_t* model, int thread_num, FILE* output_file);
 
 void show_help() {
     fprintf(stderr, 
@@ -188,8 +188,8 @@ int main(int argc, char** argv) {
         test_and_train_is_same = true;
     }
 
-    FlyReader_t* train_data_reader = NULL;
-    FlyReader_t* test_data_reader  = NULL;
+    IReader_t* train_data_reader = NULL;
+    IReader_t* test_data_reader  = NULL;
     if ( binary_mode ) {
         if (input_file) {
             train_data_reader = new BinaryFeatureReader_t(input_file);  
@@ -292,7 +292,7 @@ int main(int argc, char** argv) {
 struct TestJob_t {
     int job_id;
     PCPool_t<Instance_t>* pool;
-    FlyReader_t* reader;
+    IReader_t* reader;
     FArray_t<ResultPair_t> ans_list;
     FlyModel_t* model;
     ThreadData_t<FILE*>* output_file;
@@ -338,7 +338,7 @@ void* thread_test(void* c) {
     return NULL;
 }
 
-void test(FlyReader_t* treader, FlyModel_t* model, int thread_num, FILE* output_file) {
+void test(IReader_t* treader, FlyModel_t* model, int thread_num, FILE* output_file) {
     // 1 reader + thread_num workers.
     thread_num += 1;
     TestJob_t* jobs = new TestJob_t[thread_num];

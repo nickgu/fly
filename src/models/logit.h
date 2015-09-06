@@ -183,7 +183,7 @@ float LogitSolver::update(Instance_t& item) {
 
 struct UniformerJob_t {
     int job_id;
-    FlyReader_t* reader;
+    IReader_t* reader;
     PCPool_t<Instance_t>* pool;
     MeanStdvar_Uniform* uniformer;
     ThreadData_t<FILE*>* output_fp;
@@ -345,7 +345,7 @@ class LogisticRegression_t
             _continuous_training = true;
         }
 
-        virtual void init(FlyReader_t* reader) {
+        virtual void init(IReader_t* reader) {
             IterModel_t::init(reader);
 
             if (_continuous_training) {
