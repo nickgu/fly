@@ -16,7 +16,7 @@
 #include "fly_core.h"
 
 int main(int argc, const char** argv) {
-    BinaryFeatureReader_t reader;
+    BinaryReader_t reader;
     reader.set(argv[1]);
     int d = reader.dim();
     int s = reader.size();

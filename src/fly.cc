@@ -192,14 +192,14 @@ int main(int argc, char** argv) {
     IReader_t* test_data_reader  = NULL;
     if ( binary_mode ) {
         if (input_file) {
-            train_data_reader = new BinaryFeatureReader_t(input_file);  
-            ((BinaryFeatureReader_t*)train_data_reader)->stat();
+            train_data_reader = new BinaryReader_t(input_file);  
+            ((BinaryReader_t*)train_data_reader)->stat();
         }
         if (test_file) {
             if (test_and_train_is_same) {
                 test_data_reader = train_data_reader;
             } else {
-                test_data_reader = new BinaryFeatureReader_t(test_file);
+                test_data_reader = new BinaryReader_t(test_file);
             }
         }
 

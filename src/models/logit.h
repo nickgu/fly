@@ -401,7 +401,7 @@ class LogisticRegression_t
                 delete out;
                 delete pool;
 
-                _reader = new BinaryFeatureReader_t(temp_lr_file);
+                _reader = new BinaryReader_t(temp_lr_file);
                 _reader->reset();
             }
 

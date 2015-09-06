@@ -277,11 +277,11 @@ class DenseReader_t:
 };
 #endif
 
-class BinaryFeatureReader_t 
+class BinaryReader_t 
     : public IReader_t
 {
     public:
-        BinaryFeatureReader_t(const char* filename=NULL):
+        BinaryReader_t(const char* filename=NULL):
             _cur_id(0),
             _size(0),
             _theta_num(0)
@@ -291,7 +291,7 @@ class BinaryFeatureReader_t
             }
         }
 
-        virtual ~BinaryFeatureReader_t() {
+        virtual ~BinaryReader_t() {
             if (_stream) {
                 fclose(_stream);
             }
