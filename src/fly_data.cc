@@ -268,15 +268,15 @@ TextReader_t::auto_detect_mode(const char* line) {
     }
 
     if (is_indvalue) {
-        LOG_NOTICE("-->> AutoDetectFeatureMode: IndValue <<---");
+        LOG_NOTICE(TC_CYAN "-->> AutoDetectFeatureMode: IndValue <<---" TC_NONE);
         return TFM_IndValue;
 
     } else if (is_values) {
-        LOG_NOTICE("-->> AutoDetectFeatureMode: Values <<---");
+        LOG_NOTICE(TC_CYAN "-->> AutoDetectFeatureMode: Values <<---" TC_NONE);
         return TFM_Values;
 
     } else {
-        LOG_NOTICE("-->> AutoDetectFeatureMode: Ind_1 <<---");
+        LOG_NOTICE(TC_CYAN "-->> AutoDetectFeatureMode: Ind_1 <<---" TC_NONE);
         return TFM_Ind_1;
     }
 }

@@ -76,7 +76,7 @@ class IterModel_t:
                 _epoch_timer.begin();
                 float loss = _epoch();
                 _epoch_timer.end();
-                LOG_NOTICE("ROUND[%d] LOSS=[[ %f ]] EPOCH_TIMER=%.3f(s)", i+1, loss, _epoch_timer.cost_time());
+                LOG_NOTICE(TC_GREEN "ROUND[%d] LOSS=[[ %f ]] EPOCH_TIMER=%.3f(s)" TC_NONE, i+1, loss, _epoch_timer.cost_time());
 
                 if (_force_stop) {
                     LOG_NOTICE("model force stop!");

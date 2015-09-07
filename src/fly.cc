@@ -358,11 +358,12 @@ void test(IReader_t* treader, FlyModel_t* model, int thread_num, FILE* output_fi
 
     ResultPair_t* res_buffer = total_list.buffer();
     size_t c = total_list.size();
-    LOG_NOTICE("auc: %.6f", calc_auc(c, res_buffer));
-    LOG_NOTICE("logMLE: %.6f", calc_log_mle(c, res_buffer));
+    LOG_NOTICE(TC_GREEN "====>> Test Result <<====" TC_NONE);
+    LOG_NOTICE(TC_RED "auc: %.6f" TC_NONE, calc_auc(c, res_buffer));
+    LOG_NOTICE(TC_RED "logMLE: %.6f" TC_NONE, calc_log_mle(c, res_buffer));
     float rmse = calc_rmse(c, res_buffer);
-    LOG_NOTICE("rmse: %f, mse=%f", rmse, rmse*rmse);
-    LOG_NOTICE("confussion: %s", calc_confussion_matrix(c, res_buffer).str().c_str());
+    LOG_NOTICE(TC_RED "rmse: %f, mse=%f" TC_NONE, rmse, rmse*rmse);
+    LOG_NOTICE(TC_RED "confussion: %s" TC_NONE, calc_confussion_matrix(c, res_buffer).str().c_str());
 
     int error = calc_error(c, res_buffer);
     LOG_NOTICE("error: %d/%d (%.2f%%)", error, c, error*100.0/c);
