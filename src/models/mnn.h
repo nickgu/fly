@@ -39,7 +39,6 @@ class MultiNNSolver_t:
         float** _delta; 
         size_t* _out_num;
 
-        float _current_loss;
         float _learn_rate_in_use;
 
     private:
@@ -259,14 +258,9 @@ class MultiNN_t :
         size_t  _layer_num;
         size_t  _layer_width;
 
-        float _current_loss;
         float _learn_rate_in_use;
 
     private:
-        void _train_begin() {
-            _current_loss = 1.0;
-        }
-
         void _release() {
             _input_num = 0;
             if (_theta) {
