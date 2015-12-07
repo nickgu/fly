@@ -158,7 +158,10 @@ MultiNNSolver_t::update(Instance_t& item) {
         }
 
         for (size_t O=0; O<_out_num[L]; ++O) {
+            // two types of LOSS.
             float desc = _delta[L][O] * (_out[L][O] * (1.0 - _out[L][O]));
+            //float desc = _delta[L][O];
+
             //LOG_NOTICE("update @L%d,U%d desc=%f, out=%f", L, O, desc, _out[L][O]);
             _const[L][O] += desc * _learn_rate_in_use;
             // update const.
@@ -172,6 +175,10 @@ MultiNNSolver_t::update(Instance_t& item) {
                 for (size_t in_idx=0; in_idx<_out_num[L-1]; ++in_idx) {
                     float in = _out[L-1][in_idx];
                     float gradient = desc * in;
+                    if (L!=(int)_layer_num-1) {
+                        // ReLU?
+                        gradient = desc;
+                    }
 
                     _delta[L-1][in_idx] += desc * _ref_theta(L, O, in_idx);
                     _ref_theta(L, O, in_idx) += gradient * _learn_rate_in_use;

@@ -55,7 +55,7 @@ using namespace std;
 #endif 
 
 #ifndef LOG_ERROR
-#define LOG_ERROR(format, ...) {fprintf(stderr, " ERROR: " format "\n", ##__VA_ARGS__);}
+#define LOG_ERROR(format, ...) {fprintf(stderr, TC_YELLOW" ERROR: " TC_RED format TC_NONE"\n", ##__VA_ARGS__);}
 #endif
 
 /*
@@ -131,17 +131,16 @@ class FArray_t {
         }
 
         FArray_t& operator = (const FArray_t& o) {
+            _release();
+
+            _bnum = o._bnum;
             _num = o._num;
             _extend_num = o._extend_num;
-
-            if (_bnum < o._bnum) {
-                if (_bnum>0) {
-                    free(_l);
-                }
-                _bnum = o._bnum;
+            if (_bnum > 0) {
                 _l = (T*)malloc(_bnum * sizeof(T));
+                memcpy(_l, o._l, _num * sizeof(T));
             }
-            memcpy(_l, o._l, _num * sizeof(T));
+
             return *this;
         }
 
@@ -205,6 +204,11 @@ class FArray_t {
                 throw std::runtime_error("extend buffer for FArray failed!");
             }
             _bnum += _extend_num;
+
+            // NOTICE! placement new.
+            for (size_t i=_num; i<_bnum; ++i) {
+                new(_l+i) T();
+            }
         }
 
         void _release() {

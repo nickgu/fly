@@ -102,10 +102,12 @@ float LogitSolver::update(Instance_t& item) {
 
     float cur_rate = _learn_rate;
     float p = sigmoid( sparse_dot(_theta, item.features) );
-    float desc = (item.label - p);
-    
+
+    // two types of LOSS.
+    // desc@ LOG-loss.
+    //float desc = (item.label - p);
     // desc@ MSE-loss:
-    //desc *= (1-p) * p;
+    float desc = (item.label - p) * (1-p) * p;
 
     // variant-update : x_square.
     /*

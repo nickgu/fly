@@ -52,6 +52,7 @@ BinaryReader_t::set(const char* filename) {
     LOG_NOTICE("BinaryReader_t open [%s]", filename);
     _stream = fopen(filename, "rb");
     if (_stream == NULL) {
+        LOG_ERROR("Cannot open file [%s]", filename);
         throw std::runtime_error(string("Cannot open file : ") + string(filename));
     }
 
@@ -145,6 +146,7 @@ TextReader_t::set(const char* filename) {
     //_preprocess = preprocess;
     _stream = fopen(filename, "r");
     if (_stream == NULL) {
+        LOG_ERROR("Cannot open file [%s]", filename);
         throw std::runtime_error(string("Cannot open file : ") + string(filename));
     }
 
