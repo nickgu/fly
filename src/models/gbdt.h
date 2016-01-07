@@ -271,8 +271,13 @@ void* __worker_layer_processor(void* input) {
         TreeNode_t& node = job.tree[n];
         node.fidx = job.feature_index;
         node.end = node.grow;
-        // change score from middle-score to MSE.
-        node.score = (node.square_sum - node.score) / node.cnt;
+
+        if (node.cnt == 0) {
+            node.score = 0.0f;
+        } else {
+            // change score from middle-score to MSE.
+            node.score = (node.square_sum - node.score) / node.cnt;
+        }
 
         if (master_tree[n] < job.tree[n]) {
             // lock node.
