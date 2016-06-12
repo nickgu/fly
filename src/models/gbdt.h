@@ -83,10 +83,18 @@ struct TreeNode_t {
         square_sum = 0;
     }
 
-    void read(FILE* stream) {
-        fread(&fidx, 1, sizeof(fidx), stream);
+    int read(FILE* stream) {
+        int res = 0;
+        res = fread(&fidx, 1, sizeof(fidx), stream);
+        if ( res == 0 )
+            return 0£»
         fread(&threshold, 1, sizeof(threshold), stream);
+        if ( res == 0 )
+            return 0£»
         fread(&mean, 1, sizeof(mean), stream);
+        if ( res == 0 )
+            return 0£»
+        return 1;
     }
 
     void write(FILE* stream) const {
@@ -546,6 +554,20 @@ class GBDT_t
             return ;
         }
 
+        virtual void write_model_epoch(FILE* stream, int tree_count) const {
+            fwrite(&tree_count, 1, sizeof(tree_count), stream);
+            fwrite(&_tree_size, 1, sizeof(_tree_size), stream);
+            fwrite(&_sr, 1, sizeof(_sr), stream);
+
+            for (int T=0; T<tree_count; ++T) {
+                for (int i=0; i<_tree_size; ++i) {
+                    _trees[T][i].write(stream);
+                }
+            }
+            return ;
+        }
+
+
         virtual void read_model(FILE* stream) {
             if (stream == NULL) {
                 LOG_ERROR("Cannot load model from input stream.");
@@ -944,7 +966,7 @@ class GBDT_t
                     if (!autosave) {
                         LOG_ERROR("Fail to save autosave model. [%s]", fn);
                     } else {
-                        write_model( autosave );
+                        write_model_epoch( autosave, T+1 );
                         fclose(autosave);
                     }
                 }
