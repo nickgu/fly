@@ -87,13 +87,13 @@ struct TreeNode_t {
         int res = 0;
         res = fread(&fidx, 1, sizeof(fidx), stream);
         if ( res == 0 )
-            return 0£»
+            return 0;
         fread(&threshold, 1, sizeof(threshold), stream);
         if ( res == 0 )
-            return 0£»
+            return 0;
         fread(&mean, 1, sizeof(mean), stream);
         if ( res == 0 )
-            return 0£»
+            return 0;
         return 1;
     }
 
