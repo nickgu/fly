@@ -1,2 +1,2 @@
 # fly
-A machine learning toolkit. Including many methods, written in C++, and it's very very fast.
+A C++ version GBDT tool. Very fast at single machine. No time to make a distribution version.
